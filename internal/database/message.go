@@ -1,28 +1,33 @@
 package database
 
+import "encoding/json"
+
 type Message struct {
-	ID          int64   `json:"id"`
-	BotDBID     string  `json:"bot_db_id"`
-	Direction   string  `json:"direction"`
-	FromUserID  string  `json:"from_user_id"`
-	ToUserID    string  `json:"to_user_id,omitempty"`
-	MessageType int     `json:"message_type"`
-	Content     string  `json:"content"`
-	SublevelID  *string `json:"sublevel_id,omitempty"`
-	CreatedAt   int64   `json:"created_at"`
+	ID        int64           `json:"id"`
+	BotID     string          `json:"bot_id"`
+	ChannelID *string         `json:"channel_id,omitempty"`
+	Direction string          `json:"direction"`
+	Sender    string          `json:"sender"`
+	Recipient string          `json:"recipient,omitempty"`
+	MsgType   string          `json:"msg_type"`
+	Payload   json.RawMessage `json:"payload"`
+	CreatedAt int64           `json:"created_at"`
 }
 
 func (db *DB) SaveMessage(m *Message) (int64, error) {
+	if m.Payload == nil {
+		m.Payload = json.RawMessage(`{}`)
+	}
 	var id int64
 	err := db.QueryRow(`
-		INSERT INTO messages (bot_db_id, direction, from_user_id, to_user_id, message_type, content, sublevel_id)
+		INSERT INTO messages (bot_id, channel_id, direction, sender, recipient, msg_type, payload)
 		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-		m.BotDBID, m.Direction, m.FromUserID, m.ToUserID, m.MessageType, m.Content, m.SublevelID,
+		m.BotID, m.ChannelID, m.Direction, m.Sender, m.Recipient, m.MsgType, m.Payload,
 	).Scan(&id)
 	return id, err
 }
 
-func (db *DB) ListMessages(botDBID string, limit int, beforeID int64) ([]Message, error) {
+func (db *DB) ListMessages(botID string, limit int, beforeID int64) ([]Message, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
@@ -35,17 +40,17 @@ func (db *DB) ListMessages(botDBID string, limit int, beforeID int64) ([]Message
 	var err error
 	if beforeID > 0 {
 		rows, err = db.Query(`
-			SELECT id, bot_db_id, direction, from_user_id, to_user_id, message_type, content, sublevel_id,
+			SELECT id, bot_id, channel_id, direction, sender, recipient, msg_type, payload,
 			       EXTRACT(EPOCH FROM created_at)::BIGINT
-			FROM messages WHERE bot_db_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3`,
-			botDBID, beforeID, limit,
+			FROM messages WHERE bot_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3`,
+			botID, beforeID, limit,
 		)
 	} else {
 		rows, err = db.Query(`
-			SELECT id, bot_db_id, direction, from_user_id, to_user_id, message_type, content, sublevel_id,
+			SELECT id, bot_id, channel_id, direction, sender, recipient, msg_type, payload,
 			       EXTRACT(EPOCH FROM created_at)::BIGINT
-			FROM messages WHERE bot_db_id = $1 ORDER BY id DESC LIMIT $2`,
-			botDBID, limit,
+			FROM messages WHERE bot_id = $1 ORDER BY id DESC LIMIT $2`,
+			botID, limit,
 		)
 	}
 	if err != nil {
@@ -55,8 +60,8 @@ func (db *DB) ListMessages(botDBID string, limit int, beforeID int64) ([]Message
 	var msgs []Message
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.BotDBID, &m.Direction, &m.FromUserID, &m.ToUserID,
-			&m.MessageType, &m.Content, &m.SublevelID, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.BotID, &m.ChannelID, &m.Direction,
+			&m.Sender, &m.Recipient, &m.MsgType, &m.Payload, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		msgs = append(msgs, m)
@@ -64,16 +69,16 @@ func (db *DB) ListMessages(botDBID string, limit int, beforeID int64) ([]Message
 	return msgs, rows.Err()
 }
 
-func (db *DB) ListMessagesByUser(botDBID, fromUserID string, limit int) ([]Message, error) {
+func (db *DB) ListMessagesBySender(botID, sender string, limit int) ([]Message, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
 	rows, err := db.Query(`
-		SELECT id, bot_db_id, direction, from_user_id, to_user_id, message_type, content, sublevel_id,
+		SELECT id, bot_id, channel_id, direction, sender, recipient, msg_type, payload,
 		       EXTRACT(EPOCH FROM created_at)::BIGINT
-		FROM messages WHERE bot_db_id = $1 AND (from_user_id = $2 OR to_user_id = $2)
+		FROM messages WHERE bot_id = $1 AND (sender = $2 OR recipient = $2)
 		ORDER BY id DESC LIMIT $3`,
-		botDBID, fromUserID, limit,
+		botID, sender, limit,
 	)
 	if err != nil {
 		return nil, err
@@ -82,8 +87,34 @@ func (db *DB) ListMessagesByUser(botDBID, fromUserID string, limit int) ([]Messa
 	var msgs []Message
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.BotDBID, &m.Direction, &m.FromUserID, &m.ToUserID,
-			&m.MessageType, &m.Content, &m.SublevelID, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.BotID, &m.ChannelID, &m.Direction,
+			&m.Sender, &m.Recipient, &m.MsgType, &m.Payload, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
+}
+
+func (db *DB) GetMessagesSince(botID string, afterSeq int64, limit int) ([]Message, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := db.Query(`
+		SELECT id, bot_id, channel_id, direction, sender, recipient, msg_type, payload,
+		       EXTRACT(EPOCH FROM created_at)::BIGINT
+		FROM messages WHERE bot_id = $1 AND id > $2 ORDER BY id ASC LIMIT $3`,
+		botID, afterSeq, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var msgs []Message
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.BotID, &m.ChannelID, &m.Direction,
+			&m.Sender, &m.Recipient, &m.MsgType, &m.Payload, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		msgs = append(msgs, m)

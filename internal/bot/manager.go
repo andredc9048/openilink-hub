@@ -2,12 +2,13 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strings"
 	"sync"
 
-	ilink "github.com/openilink/openilink-sdk-go"
 	"github.com/openilink/openilink-hub/internal/database"
+	"github.com/openilink/openilink-hub/internal/provider"
 	"github.com/openilink/openilink-hub/internal/relay"
 )
 
@@ -34,7 +35,7 @@ func (m *Manager) StartAll(ctx context.Context) {
 		return
 	}
 	for _, b := range bots {
-		if b.BotToken == "" {
+		if len(b.Credentials) == 0 || string(b.Credentials) == "{}" {
 			continue
 		}
 		if err := m.StartBot(ctx, &b); err != nil {
@@ -50,10 +51,36 @@ func (m *Manager) StartBot(ctx context.Context, bot *database.Bot) error {
 	if old, ok := m.instances[bot.ID]; ok {
 		old.Stop()
 	}
-	inst := NewInstance(bot)
-	inst.Start(ctx, m.db, m.onInbound, m.onStatusChange)
+
+	factory, ok := provider.Get(bot.Provider)
+	if !ok {
+		slog.Error("unknown provider", "provider", bot.Provider, "bot", bot.ID)
+		return nil
+	}
+
+	p := factory()
+	inst := NewInstance(bot.ID, p)
+
+	err := p.Start(ctx, provider.StartOptions{
+		Credentials: bot.Credentials,
+		SyncState:   bot.SyncState,
+		OnMessage: func(msg provider.InboundMessage) {
+			m.onInbound(inst, msg)
+		},
+		OnStatus: func(status string) {
+			_ = m.db.UpdateBotStatus(bot.ID, status)
+			m.onStatusChange(inst, status)
+		},
+		OnSyncUpdate: func(state json.RawMessage) {
+			_ = m.db.UpdateBotSyncState(bot.ID, state)
+		},
+	})
+	if err != nil {
+		return err
+	}
+
 	m.instances[bot.ID] = inst
-	slog.Info("bot started", "bot", bot.ID, "ilink_bot_id", bot.BotID)
+	slog.Info("bot started", "bot", bot.ID, "provider", bot.Provider)
 	return nil
 }
 
@@ -82,7 +109,7 @@ func (m *Manager) StopAll() {
 	m.instances = make(map[string]*Instance)
 }
 
-// onStatusChange broadcasts bot status to all sublevels.
+// onStatusChange broadcasts bot status to all channels.
 func (m *Manager) onStatusChange(inst *Instance, status string) {
 	env := relay.NewEnvelope("bot_status", relay.BotStatusData{
 		BotID:  inst.DBID,
@@ -92,111 +119,82 @@ func (m *Manager) onStatusChange(inst *Instance, status string) {
 }
 
 // onInbound routes an inbound message with filtering.
-func (m *Manager) onInbound(inst *Instance, msg ilink.WeixinMessage) {
-	text := ilink.ExtractText(&msg)
-	fromUser := msg.FromUserID
-
-	// Determine message type and content for storage
-	content := text
-	msgType := 1
-	for _, item := range msg.ItemList {
+func (m *Manager) onInbound(inst *Instance, msg provider.InboundMessage) {
+	// Determine primary msg type and content for storage
+	msgType := "text"
+	content := ""
+	for _, item := range msg.Items {
 		switch item.Type {
-		case ilink.ItemImage:
-			msgType = 2
+		case "text":
+			content = item.Text
+		case "image", "voice", "file", "video":
+			msgType = item.Type
 			if content == "" {
-				content = "[image]"
-			}
-		case ilink.ItemVoice:
-			msgType = 3
-			if item.VoiceItem != nil && item.VoiceItem.Text != "" {
-				content = item.VoiceItem.Text
-			} else if content == "" {
-				content = "[voice]"
-			}
-		case ilink.ItemFile:
-			msgType = 4
-			if item.FileItem != nil {
-				content = item.FileItem.FileName
-			}
-		case ilink.ItemVideo:
-			msgType = 5
-			if content == "" {
-				content = "[video]"
+				if item.Text != "" {
+					content = item.Text
+				} else if item.FileName != "" {
+					content = item.FileName
+				} else {
+					content = "[" + item.Type + "]"
+				}
 			}
 		}
 	}
 
-	// Save to DB and get sequence ID
+	payload, _ := json.Marshal(map[string]any{"content": content})
+
 	dbMsg := &database.Message{
-		BotDBID:     inst.DBID,
-		Direction:   "inbound",
-		FromUserID:  fromUser,
-		MessageType: msgType,
-		Content:     content,
+		BotID:     inst.DBID,
+		Direction: "inbound",
+		Sender:    msg.Sender,
+		MsgType:   msgType,
+		Payload:   payload,
 	}
 	seqID, _ := m.db.SaveMessage(dbMsg)
 	_ = m.db.IncrBotMsgCount(inst.DBID)
 
 	// Build relay envelope
-	var items []relay.MessageItem
-	for _, item := range msg.ItemList {
-		switch item.Type {
-		case ilink.ItemText:
-			if item.TextItem != nil {
-				items = append(items, relay.MessageItem{Type: "text", Text: item.TextItem.Text})
-			}
-		case ilink.ItemImage:
-			items = append(items, relay.MessageItem{Type: "image"})
-		case ilink.ItemVoice:
-			mi := relay.MessageItem{Type: "voice"}
-			if item.VoiceItem != nil {
-				mi.Text = item.VoiceItem.Text
-			}
-			items = append(items, mi)
-		case ilink.ItemFile:
-			mi := relay.MessageItem{Type: "file"}
-			if item.FileItem != nil {
-				mi.FileName = item.FileItem.FileName
-			}
-			items = append(items, mi)
-		case ilink.ItemVideo:
-			items = append(items, relay.MessageItem{Type: "video"})
+	items := make([]relay.MessageItem, len(msg.Items))
+	for i, item := range msg.Items {
+		items[i] = relay.MessageItem{
+			Type:     item.Type,
+			Text:     item.Text,
+			FileName: item.FileName,
 		}
 	}
 
 	env := relay.NewEnvelope("message", relay.MessageData{
 		SeqID:        seqID,
-		MessageID:    msg.MessageID,
-		FromUserID:   fromUser,
-		Timestamp:    msg.CreateTimeMs,
+		ExternalID:   msg.ExternalID,
+		Sender:       msg.Sender,
+		Timestamp:    msg.Timestamp,
 		Items:        items,
 		ContextToken: msg.ContextToken,
 		SessionID:    msg.SessionID,
 	})
 
-	// Load sublevels and filter
-	subs, err := m.db.ListSublevelsByBot(inst.DBID)
+	// Load channels and filter
+	channels, err := m.db.ListChannelsByBot(inst.DBID)
 	if err != nil {
-		slog.Error("load sublevels failed", "bot", inst.DBID, "err", err)
+		slog.Error("load channels failed", "bot", inst.DBID, "err", err)
 		return
 	}
 
-	for _, sub := range subs {
-		if !matchFilter(sub.FilterRule, fromUser, text, msgType) {
+	for _, ch := range channels {
+		if !matchFilter(ch.FilterRule, msg.Sender, content, msgType) {
 			continue
 		}
-		m.hub.SendTo(sub.ID, env)
-		_ = m.db.UpdateSublevelLastSeq(sub.ID, seqID)
+		m.hub.SendTo(ch.ID, env)
+		_ = m.db.UpdateChannelLastSeq(ch.ID, seqID)
 	}
 }
 
-// matchFilter checks if a message passes the sublevel's filter rule.
-func matchFilter(rule database.FilterRule, fromUser, text string, msgType int) bool {
-	// User filter
+// matchFilter checks if a message passes the channel's filter rule.
+func matchFilter(rule database.FilterRule, sender, text, msgType string) bool {
 	if len(rule.UserIDs) > 0 {
 		found := false
 		for _, uid := range rule.UserIDs {
-			if uid == fromUser {
+			if uid == sender {
 				found = true
 				break
 			}
@@ -206,7 +204,6 @@ func matchFilter(rule database.FilterRule, fromUser, text string, msgType int) b
 		}
 	}
 
-	// Message type filter
 	if len(rule.MessageTypes) > 0 {
 		found := false
 		for _, mt := range rule.MessageTypes {
@@ -220,7 +217,6 @@ func matchFilter(rule database.FilterRule, fromUser, text string, msgType int) b
 		}
 	}
 
-	// Keyword filter (any keyword match in text)
 	if len(rule.Keywords) > 0 {
 		found := false
 		lower := strings.ToLower(text)

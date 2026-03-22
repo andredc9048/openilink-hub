@@ -12,6 +12,12 @@ type Config struct {
 	RPID       string // WebAuthn Relying Party ID, e.g. "localhost"
 	RPName     string
 	Secret     string // server secret for token encryption
+
+	// OAuth providers
+	GitHubClientID     string
+	GitHubClientSecret string
+	LinuxDoClientID     string
+	LinuxDoClientSecret string
 }
 
 func Parse() *Config {
@@ -22,6 +28,11 @@ func Parse() *Config {
 	flag.StringVar(&cfg.RPID, "rpid", envOr("RP_ID", "localhost"), "WebAuthn RP ID")
 	flag.StringVar(&cfg.RPName, "rpname", envOr("RP_NAME", "OpenILink Hub"), "WebAuthn RP display name")
 	flag.StringVar(&cfg.Secret, "secret", envOr("SECRET", "change-me-in-production"), "server secret")
+	// OAuth
+	cfg.GitHubClientID = envOr("GITHUB_CLIENT_ID", "")
+	cfg.GitHubClientSecret = envOr("GITHUB_CLIENT_SECRET", "")
+	cfg.LinuxDoClientID = envOr("LINUXDO_CLIENT_ID", "")
+	cfg.LinuxDoClientSecret = envOr("LINUXDO_CLIENT_SECRET", "")
 	flag.Parse()
 	return cfg
 }

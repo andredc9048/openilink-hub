@@ -15,22 +15,22 @@ const (
 	maxMsgSize = 64 * 1024
 )
 
-// Conn wraps a single WebSocket connection for a sub-level client.
+// Conn wraps a single WebSocket connection for a channel client.
 type Conn struct {
-	SublevelID string
-	BotDBID    string
-	ws         *websocket.Conn
-	hub        *Hub
-	send       chan []byte
+	ChannelID string
+	BotID     string
+	ws        *websocket.Conn
+	hub       *Hub
+	send      chan []byte
 }
 
-func NewConn(sublevelID, botDBID string, ws *websocket.Conn, hub *Hub) *Conn {
+func NewConn(channelID, botID string, ws *websocket.Conn, hub *Hub) *Conn {
 	return &Conn{
-		SublevelID: sublevelID,
-		BotDBID:    botDBID,
-		ws:         ws,
-		hub:        hub,
-		send:       make(chan []byte, 64),
+		ChannelID: channelID,
+		BotID:     botID,
+		ws:        ws,
+		hub:       hub,
+		send:      make(chan []byte, 64),
 	}
 }
 
@@ -42,7 +42,7 @@ func (c *Conn) Send(env Envelope) {
 	select {
 	case c.send <- data:
 	default:
-		slog.Warn("ws send buffer full, dropping", "sublevel", c.SublevelID)
+		slog.Warn("ws send buffer full, dropping", "channel", c.ChannelID)
 	}
 }
 

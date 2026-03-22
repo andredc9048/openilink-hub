@@ -4,12 +4,22 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+
+	"github.com/openilink/openilink-hub/internal/auth"
 )
 
 func (s *Server) handleListMessages(w http.ResponseWriter, r *http.Request) {
+	userID := auth.UserIDFromContext(r.Context())
 	botID := r.URL.Query().Get("bot_id")
 	if botID == "" {
-		http.Error(w, `{"error":"bot_id required"}`, http.StatusBadRequest)
+		jsonError(w, "bot_id required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify bot ownership
+	bot, err := s.DB.GetBot(botID)
+	if err != nil || bot.UserID != userID {
+		jsonError(w, "not found", http.StatusNotFound)
 		return
 	}
 
@@ -27,7 +37,7 @@ func (s *Server) handleListMessages(w http.ResponseWriter, r *http.Request) {
 
 	msgs, err := s.DB.ListMessages(botID, limit, beforeID)
 	if err != nil {
-		http.Error(w, `{"error":"query failed"}`, http.StatusInternalServerError)
+		jsonError(w, "query failed", http.StatusInternalServerError)
 		return
 	}
 

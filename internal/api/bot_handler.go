@@ -6,42 +6,29 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sync"
-	"time"
 
-	ilink "github.com/openilink/openilink-sdk-go"
+	ilinkProvider "github.com/openilink/openilink-hub/internal/provider/ilink"
 	"github.com/openilink/openilink-hub/internal/auth"
 	"github.com/openilink/openilink-hub/internal/database"
+	"github.com/openilink/openilink-hub/internal/provider"
 )
-
-// pendingBinds tracks in-flight QR bind sessions.
-var pendingBinds = struct {
-	sync.Mutex
-	m map[string]*bindSession
-}{m: make(map[string]*bindSession)}
-
-type bindSession struct {
-	client *ilink.Client
-	qrCode string
-	userID string
-}
 
 func (s *Server) handleListBots(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
 	bots, err := s.DB.ListBotsByUser(userID)
 	if err != nil {
-		http.Error(w, `{"error":"list failed"}`, http.StatusInternalServerError)
+		jsonError(w, "list failed", http.StatusInternalServerError)
 		return
 	}
 
-	// Enrich with live status
 	type botResp struct {
-		ID          string `json:"id"`
-		BotID       string `json:"bot_id"`
-		BaseURL     string `json:"base_url"`
-		ILinkUserID string `json:"ilink_user_id"`
-		Status      string `json:"status"`
-		CreatedAt   int64  `json:"created_at"`
+		ID        string          `json:"id"`
+		Name      string          `json:"name"`
+		Provider  string          `json:"provider"`
+		Status    string          `json:"status"`
+		MsgCount  int64           `json:"msg_count"`
+		CreatedAt int64           `json:"created_at"`
+		Extra     json.RawMessage `json:"extra,omitempty"`
 	}
 	var result []botResp
 	for _, b := range bots {
@@ -49,9 +36,12 @@ func (s *Server) handleListBots(w http.ResponseWriter, r *http.Request) {
 		if inst, ok := s.BotManager.GetInstance(b.ID); ok {
 			status = inst.Status()
 		}
+		// Extract non-secret info from credentials for display
+		extra := extractPublicCredentials(b.Provider, b.Credentials)
 		result = append(result, botResp{
-			ID: b.ID, BotID: b.BotID, BaseURL: b.BaseURL,
-			ILinkUserID: b.ILinkUserID, Status: status, CreatedAt: b.CreatedAt,
+			ID: b.ID, Name: b.Name, Provider: b.Provider,
+			Status: status, MsgCount: b.MsgCount, CreatedAt: b.CreatedAt,
+			Extra: extra,
 		})
 	}
 
@@ -59,48 +49,47 @@ func (s *Server) handleListBots(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(result)
 }
 
+// extractPublicCredentials returns non-secret info from credentials for the API response.
+func extractPublicCredentials(prov string, creds json.RawMessage) json.RawMessage {
+	if prov == "ilink" {
+		var c struct {
+			BotID       string `json:"bot_id"`
+			ILinkUserID string `json:"ilink_user_id"`
+		}
+		json.Unmarshal(creds, &c)
+		data, _ := json.Marshal(map[string]string{
+			"bot_id":        c.BotID,
+			"ilink_user_id": c.ILinkUserID,
+		})
+		return data
+	}
+	return nil
+}
+
 func (s *Server) handleBindStart(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
 
-	client := ilink.NewClient("")
-	qr, err := client.FetchQRCode(r.Context())
+	sessionID, qrURL, err := ilinkProvider.StartBind(r.Context(), userID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadGateway)
+		jsonError(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-
-	sessionID := fmt.Sprintf("bind-%d", r.Context().Value(struct{}{}) ) // simple
-	// Use a proper unique ID
-	sessionID = fmt.Sprintf("bind-%s-%d", userID[:8], unixMs())
-
-	pendingBinds.Lock()
-	pendingBinds.m[sessionID] = &bindSession{
-		client: client,
-		qrCode: qr.QRCode,
-		userID: userID,
-	}
-	pendingBinds.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"session_id": sessionID,
-		"qr_url":     qr.QRCodeImgContent,
+		"qr_url":     qrURL,
 	})
-}
-
-func unixMs() int64 {
-	return time.Now().UnixMilli()
 }
 
 func (s *Server) handleBindStatus(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("sessionID")
 
-	pendingBinds.Lock()
-	bs, ok := pendingBinds.m[sessionID]
-	pendingBinds.Unlock()
-
+	ilinkProvider.PendingBinds.Lock()
+	entry, ok := ilinkProvider.PendingBinds.M[sessionID]
+	ilinkProvider.PendingBinds.Unlock()
 	if !ok {
-		http.Error(w, `{"error":"session not found"}`, http.StatusNotFound)
+		jsonError(w, "session not found", http.StatusNotFound)
 		return
 	}
 
@@ -125,57 +114,32 @@ func (s *Server) handleBindStatus(w http.ResponseWriter, r *http.Request) {
 		default:
 		}
 
-		status, err := bs.client.PollQRStatus(ctx, bs.qrCode)
+		result, err := ilinkProvider.PollBind(ctx, sessionID)
 		if err != nil {
 			sendEvent("error", `{"message":"poll failed"}`)
 			return
 		}
 
-		switch status.Status {
+		switch result.Status {
 		case "wait":
 			sendEvent("status", `{"status":"wait"}`)
-		case "scaned":
+		case "scanned":
 			sendEvent("status", `{"status":"scanned"}`)
 		case "expired":
-			sendEvent("status", `{"status":"expired"}`)
-			// Try to refresh
-			newQR, err := bs.client.FetchQRCode(ctx)
-			if err != nil {
-				sendEvent("error", `{"message":"refresh failed"}`)
-				return
-			}
-			bs.qrCode = newQR.QRCode
-			j, _ := json.Marshal(map[string]string{"status": "refreshed", "qr_url": newQR.QRCodeImgContent})
+			j, _ := json.Marshal(map[string]string{"status": "refreshed", "qr_url": result.QRURL})
 			sendEvent("status", string(j))
 		case "confirmed":
-			if status.ILinkBotID == "" {
-				sendEvent("error", `{"message":"no bot ID"}`)
-				return
-			}
-
-			bs.client.SetToken(status.BotToken)
-			if status.BaseURL != "" {
-				bs.client.SetBaseURL(status.BaseURL)
-			}
-
-			// Save to DB
-			bot, err := s.DB.CreateBot(bs.userID, "", status.ILinkBotID, status.BotToken, status.BaseURL, status.ILinkUserID)
+			bot, err := s.DB.CreateBot(entry.UserID, "", "ilink", result.Credentials)
 			if err != nil {
 				slog.Error("save bot failed", "err", err)
 				sendEvent("error", `{"message":"save failed"}`)
 				return
 			}
 
-			// Start monitoring
 			s.BotManager.StartBot(context.Background(), bot)
 
 			j, _ := json.Marshal(map[string]string{"status": "connected", "bot_id": bot.ID})
 			sendEvent("status", string(j))
-
-			// Cleanup
-			pendingBinds.Lock()
-			delete(pendingBinds.m, sessionID)
-			pendingBinds.Unlock()
 			return
 		}
 	}
@@ -187,13 +151,12 @@ func (s *Server) handleReconnect(w http.ResponseWriter, r *http.Request) {
 
 	bot, err := s.DB.GetBot(botID)
 	if err != nil || bot.UserID != userID {
-		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		jsonError(w, "not found", http.StatusNotFound)
 		return
 	}
 
 	s.BotManager.StartBot(r.Context(), bot)
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"ok":true}`))
+	jsonOK(w)
 }
 
 func (s *Server) handleDeleteBot(w http.ResponseWriter, r *http.Request) {
@@ -202,13 +165,12 @@ func (s *Server) handleDeleteBot(w http.ResponseWriter, r *http.Request) {
 
 	bot, err := s.DB.GetBot(botID)
 	if err != nil || bot.UserID != userID {
-		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		jsonError(w, "not found", http.StatusNotFound)
 		return
 	}
 
 	s.BotManager.StopBot(botID)
 	s.DB.DeleteBot(botID)
-
 	jsonOK(w)
 }
 
@@ -260,21 +222,11 @@ func (s *Server) handleBotSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ToUserID string `json:"to_user_id"`
-		Text     string `json:"text"`
+		Recipient string `json:"recipient"`
+		Text      string `json:"text"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Text == "" {
 		jsonError(w, "text required", http.StatusBadRequest)
-		return
-	}
-
-	// Default to the bot's linked user
-	toUser := req.ToUserID
-	if toUser == "" {
-		toUser = bot.ILinkUserID
-	}
-	if toUser == "" {
-		jsonError(w, "no target user (bot has no linked user)", http.StatusBadRequest)
 		return
 	}
 
@@ -284,18 +236,22 @@ func (s *Server) handleBotSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientID, err := inst.SendText(r.Context(), toUser, req.Text)
+	clientID, err := inst.Send(r.Context(), provider.OutboundMessage{
+		Recipient: req.Recipient,
+		Text:      req.Text,
+	})
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 
+	payload, _ := json.Marshal(map[string]string{"content": req.Text})
 	s.DB.SaveMessage(&database.Message{
-		BotDBID:     botID,
-		Direction:   "outbound",
-		ToUserID:    toUser,
-		MessageType: 1,
-		Content:     req.Text,
+		BotID:     botID,
+		Direction: "outbound",
+		Recipient: req.Recipient,
+		MsgType:   "text",
+		Payload:   payload,
 	})
 
 	w.Header().Set("Content-Type", "application/json")

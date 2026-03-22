@@ -20,6 +20,7 @@ export const api = {
   login: (username: string, password: string) =>
     request("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   logout: () => request("/api/auth/logout", { method: "POST" }),
+  oauthProviders: () => request<{ providers: string[] }>("/api/auth/oauth/providers"),
   me: () => request<{ id: string; username: string; display_name: string; role: string }>("/api/auth/me"),
 
   // Bots
@@ -31,12 +32,12 @@ export const api = {
     request(`/api/bots/${id}/name`, { method: "PUT", body: JSON.stringify({ name }) }),
   botContacts: (id: string) => request<any[]>(`/api/bots/${id}/contacts`),
 
-  // Sublevels
-  listSublevels: () => request<any[]>("/api/sublevels"),
-  createSublevel: (bot_id: string, name: string) =>
-    request("/api/sublevels", { method: "POST", body: JSON.stringify({ bot_id, name }) }),
-  deleteSublevel: (id: string) => request(`/api/sublevels/${id}`, { method: "DELETE" }),
-  rotateKey: (id: string) => request<{ api_key: string }>(`/api/sublevels/${id}/rotate-key`, { method: "POST" }),
+  // Channels
+  listChannels: () => request<any[]>("/api/channels"),
+  createChannel: (bot_id: string, name: string) =>
+    request("/api/channels", { method: "POST", body: JSON.stringify({ bot_id, name }) }),
+  deleteChannel: (id: string) => request(`/api/channels/${id}`, { method: "DELETE" }),
+  rotateKey: (id: string) => request<{ api_key: string }>(`/api/channels/${id}/rotate-key`, { method: "POST" }),
 
   // Stats
   stats: () => request<any>("/api/stats"),

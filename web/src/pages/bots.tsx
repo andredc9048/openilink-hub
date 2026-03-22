@@ -13,15 +13,15 @@ const statusVariant: Record<string, "default" | "destructive" | "outline"> = {
 
 export function BotsPage() {
   const [bots, setBots] = useState<any[]>([]);
-  const [subs, setSubs] = useState<any[]>([]);
+  const [channels, setChannels] = useState<any[]>([]);
   const [binding, setBinding] = useState(false);
   const [qrUrl, setQrUrl] = useState("");
   const [bindStatus, setBindStatus] = useState("");
 
   async function load() {
-    const [b, s] = await Promise.all([api.listBots(), api.listSublevels()]);
+    const [b, c] = await Promise.all([api.listBots(), api.listChannels()]);
     setBots(b || []);
-    setSubs(s || []);
+    setChannels(c || []);
   }
 
   useEffect(() => { load(); }, []);
@@ -70,7 +70,7 @@ export function BotsPage() {
         <BotCard
           key={bot.id}
           bot={bot}
-          sublevels={subs.filter((s) => s.bot_db_id === bot.id)}
+          channelCount={(channels || []).filter((c) => c.bot_id === bot.id).length}
           onRefresh={load}
         />
       ))}
@@ -92,7 +92,7 @@ function QrCanvas({ url }: { url: string }) {
   return <canvas ref={ref} className="rounded-lg" />;
 }
 
-function BotCard({ bot, sublevels, onRefresh }: { bot: any; sublevels: any[]; onRefresh: () => void }) {
+function BotCard({ bot, channelCount, onRefresh }: { bot: any; channelCount: number; onRefresh: () => void }) {
   const navigate = useNavigate();
 
   async function handleDelete(e: React.MouseEvent) {
@@ -115,8 +115,8 @@ function BotCard({ bot, sublevels, onRefresh }: { bot: any; sublevels: any[]; on
     >
       <div>
         <p className="font-medium text-sm">{bot.name}</p>
-        <p className="text-xs text-[var(--muted-foreground)] font-mono mt-0.5">{bot.bot_id}</p>
-        <p className="text-xs text-[var(--muted-foreground)] mt-1">{sublevels.length} 个通道</p>
+        <p className="text-xs text-[var(--muted-foreground)] font-mono mt-0.5">{bot.extra?.bot_id}</p>
+        <p className="text-xs text-[var(--muted-foreground)] mt-1">{channelCount} 个通道</p>
       </div>
       <div className="flex items-center gap-2">
         <Badge variant={statusVariant[bot.status] || "outline"}>{bot.status}</Badge>
@@ -132,4 +132,3 @@ function BotCard({ bot, sublevels, onRefresh }: { bot: any; sublevels: any[]; on
     </Card>
   );
 }
-

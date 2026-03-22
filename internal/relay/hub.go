@@ -6,13 +6,13 @@ import (
 	"sync"
 )
 
-// UpstreamHandler is called when a sub-level client sends a message upstream.
+// UpstreamHandler is called when a channel client sends a message upstream.
 type UpstreamHandler func(conn *Conn, env Envelope)
 
 // Hub manages all active WebSocket connections.
 type Hub struct {
 	mu              sync.RWMutex
-	conns           map[string]*Conn // sublevelID -> conn
+	conns           map[string]*Conn // channelID -> conn
 	upstreamHandler UpstreamHandler
 }
 
@@ -27,37 +27,36 @@ func (h *Hub) Register(c *Conn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Close existing connection for same sublevel
-	if old, ok := h.conns[c.SublevelID]; ok {
+	if old, ok := h.conns[c.ChannelID]; ok {
 		close(old.send)
 	}
-	h.conns[c.SublevelID] = c
-	slog.Info("ws registered", "sublevel", c.SublevelID)
+	h.conns[c.ChannelID] = c
+	slog.Info("ws registered", "channel", c.ChannelID)
 }
 
 func (h *Hub) Unregister(c *Conn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if existing, ok := h.conns[c.SublevelID]; ok && existing == c {
-		delete(h.conns, c.SublevelID)
+	if existing, ok := h.conns[c.ChannelID]; ok && existing == c {
+		delete(h.conns, c.ChannelID)
 		close(c.send)
-		slog.Info("ws unregistered", "sublevel", c.SublevelID)
+		slog.Info("ws unregistered", "channel", c.ChannelID)
 	}
 }
 
-// SendTo sends an envelope to a specific sub-level.
-func (h *Hub) SendTo(sublevelID string, env Envelope) {
+// SendTo sends an envelope to a specific channel.
+func (h *Hub) SendTo(channelID string, env Envelope) {
 	h.mu.RLock()
-	c, ok := h.conns[sublevelID]
+	c, ok := h.conns[channelID]
 	h.mu.RUnlock()
 	if ok {
 		c.Send(env)
 	}
 }
 
-// Broadcast sends an envelope to all connected sub-levels for a given bot.
-func (h *Hub) Broadcast(botDBID string, env Envelope) {
+// Broadcast sends an envelope to all connected channels for a given bot.
+func (h *Hub) Broadcast(botID string, env Envelope) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -66,7 +65,7 @@ func (h *Hub) Broadcast(botDBID string, env Envelope) {
 		return
 	}
 	for _, c := range h.conns {
-		if c.BotDBID == botDBID {
+		if c.BotID == botID {
 			select {
 			case c.send <- data:
 			default:
@@ -75,7 +74,7 @@ func (h *Hub) Broadcast(botDBID string, env Envelope) {
 	}
 }
 
-// HandleUpstream routes a message from a sub-level client.
+// HandleUpstream routes a message from a channel client.
 func (h *Hub) HandleUpstream(c *Conn, env Envelope) {
 	if h.upstreamHandler != nil {
 		h.upstreamHandler(c, env)

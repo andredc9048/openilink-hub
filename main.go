@@ -17,6 +17,9 @@ import (
 	"github.com/openilink/openilink-hub/internal/config"
 	"github.com/openilink/openilink-hub/internal/database"
 	"github.com/openilink/openilink-hub/internal/relay"
+
+	// Register providers
+	_ "github.com/openilink/openilink-hub/internal/provider/ilink"
 )
 
 func main() {
@@ -46,6 +49,8 @@ func main() {
 		DB:           db,
 		WebAuthn:     wa,
 		SessionStore: auth.NewSessionStore(),
+		Config:       cfg,
+		OAuthStates:  api.SetupOAuth(cfg),
 	}
 
 	hub := relay.NewHub(srv.SetupUpstreamHandler())

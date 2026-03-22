@@ -6,6 +6,7 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/openilink/openilink-hub/internal/auth"
 	"github.com/openilink/openilink-hub/internal/bot"
+	"github.com/openilink/openilink-hub/internal/config"
 	"github.com/openilink/openilink-hub/internal/database"
 	"github.com/openilink/openilink-hub/internal/relay"
 	"github.com/openilink/openilink-hub/internal/web"
@@ -17,6 +18,8 @@ type Server struct {
 	SessionStore *auth.SessionStore
 	BotManager   *bot.Manager
 	Hub          *relay.Hub
+	Config       *config.Config
+	OAuthStates  *oauthStateStore
 }
 
 func cors(next http.Handler) http.Handler {
@@ -48,7 +51,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/passkey/login/finish", s.handleLoginFinish)
 	mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
 
-	// --- WebSocket (sub-level auth via api_key) ---
+	// --- OAuth ---
+	mux.HandleFunc("GET /api/auth/oauth/providers", s.handleOAuthProviders)
+	mux.HandleFunc("GET /api/auth/oauth/{provider}", s.handleOAuthRedirect)
+	mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", s.handleOAuthCallback)
+
+	// --- WebSocket (channel auth via api_key) ---
 	mux.HandleFunc("GET /api/ws", s.handleWebSocket)
 
 	// --- Protected routes ---
@@ -66,12 +74,12 @@ func (s *Server) Handler() http.Handler {
 	protected.HandleFunc("POST /api/bots/{id}/reconnect", s.handleReconnect)
 	protected.HandleFunc("DELETE /api/bots/{id}", s.handleDeleteBot)
 
-	// Sub-levels
-	protected.HandleFunc("GET /api/sublevels", s.handleListSublevels)
-	protected.HandleFunc("POST /api/sublevels", s.handleCreateSublevel)
-	protected.HandleFunc("PUT /api/sublevels/{id}", s.handleUpdateSublevel)
-	protected.HandleFunc("DELETE /api/sublevels/{id}", s.handleDeleteSublevel)
-	protected.HandleFunc("POST /api/sublevels/{id}/rotate-key", s.handleRotateKey)
+	// Channels (formerly sublevels)
+	protected.HandleFunc("GET /api/channels", s.handleListChannels)
+	protected.HandleFunc("POST /api/channels", s.handleCreateChannel)
+	protected.HandleFunc("PUT /api/channels/{id}", s.handleUpdateChannel)
+	protected.HandleFunc("DELETE /api/channels/{id}", s.handleDeleteChannel)
+	protected.HandleFunc("POST /api/channels/{id}/rotate-key", s.handleRotateKey)
 
 	// Bot stats, contacts, send
 	protected.HandleFunc("GET /api/stats", s.handleStats)

@@ -1,9 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Card } from "../components/ui/card";
 import { api } from "../lib/api";
+
+const providerLabels: Record<string, string> = {
+  github: "GitHub",
+  linuxdo: "LinuxDo",
+};
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -12,6 +17,11 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [oauthProviders, setOauthProviders] = useState<string[]>([]);
+
+  useEffect(() => {
+    api.oauthProviders().then((data) => setOauthProviders(data.providers || [])).catch(() => {});
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,6 +39,10 @@ export function LoginPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleOAuth(provider: string) {
+    window.location.href = `/api/auth/oauth/${provider}`;
   }
 
   return (
@@ -59,6 +73,34 @@ export function LoginPage() {
             {loading ? "..." : mode === "login" ? "登录" : "注册"}
           </Button>
         </form>
+
+        {oauthProviders.length > 0 && (
+          <>
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-[var(--border)]" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-[var(--card)] px-2 text-[var(--muted-foreground)]">
+                  或
+                </span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {oauthProviders.map((provider) => (
+                <Button
+                  key={provider}
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => handleOAuth(provider)}
+                >
+                  使用 {providerLabels[provider] || provider} 登录
+                </Button>
+              ))}
+            </div>
+          </>
+        )}
 
         <p className="text-center text-sm text-[var(--muted-foreground)]">
           {mode === "login" ? "没有账号？" : "已有账号？"}

@@ -353,7 +353,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 func setSessionCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name: "session", Value: token, Path: "/",
-		HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 7 * 24 * 3600,
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: 7 * 24 * 3600,
 	})
 }
 

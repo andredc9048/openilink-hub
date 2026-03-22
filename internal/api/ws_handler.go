@@ -8,6 +8,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/openilink/openilink-hub/internal/database"
+	"github.com/openilink/openilink-hub/internal/provider"
 	"github.com/openilink/openilink-hub/internal/relay"
 )
 
@@ -22,8 +23,8 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sub, err := s.DB.GetSublevelByAPIKey(apiKey)
-	if err != nil || !sub.Enabled {
+	ch, err := s.DB.GetChannelByAPIKey(apiKey)
+	if err != nil || !ch.Enabled {
 		http.Error(w, `{"error":"invalid or disabled key"}`, http.StatusUnauthorized)
 		return
 	}
@@ -34,36 +35,36 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn := relay.NewConn(sub.ID, sub.BotDBID, ws, s.Hub)
+	conn := relay.NewConn(ch.ID, ch.BotID, ws, s.Hub)
 	s.Hub.Register(conn)
 
-	// Send init message with bot info
+	// Send init message
 	botStatus := "disconnected"
-	if inst, ok := s.BotManager.GetInstance(sub.BotDBID); ok {
+	if inst, ok := s.BotManager.GetInstance(ch.BotID); ok {
 		botStatus = inst.Status()
 	}
 	conn.Send(relay.NewEnvelope("init", relay.InitData{
-		SublevelID:   sub.ID,
-		SublevelName: sub.Name,
-		BotDBID:      sub.BotDBID,
-		BotStatus:    botStatus,
+		ChannelID:   ch.ID,
+		ChannelName: ch.Name,
+		BotID:       ch.BotID,
+		BotStatus:   botStatus,
 	}))
 
 	// Replay missed messages since last_seq
-	if sub.LastSeq > 0 {
-		missed, err := s.DB.GetMessagesSince(sub.BotDBID, sub.LastSeq, 100)
+	if ch.LastSeq > 0 {
+		missed, err := s.DB.GetMessagesSince(ch.BotID, ch.LastSeq, 100)
 		if err == nil && len(missed) > 0 {
 			for _, m := range missed {
+				content := extractContent(m.Payload)
 				env := relay.NewEnvelope("message", relay.MessageData{
-					SeqID:      m.ID,
-					FromUserID: m.FromUserID,
-					Timestamp:  m.CreatedAt * 1000,
-					Items:      []relay.MessageItem{{Type: msgTypeStr(m.MessageType), Text: m.Content}},
+					SeqID:     m.ID,
+					Sender:    m.Sender,
+					Timestamp: m.CreatedAt * 1000,
+					Items:     []relay.MessageItem{{Type: m.MsgType, Text: content}},
 				})
 				conn.Send(env)
 			}
-			// Update last_seq to the latest replayed message
-			_ = s.DB.UpdateSublevelLastSeq(sub.ID, missed[len(missed)-1].ID)
+			_ = s.DB.UpdateChannelLastSeq(ch.ID, missed[len(missed)-1].ID)
 		}
 	}
 
@@ -71,22 +72,15 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn.ReadPump() // blocks
 }
 
-func msgTypeStr(t int) string {
-	switch t {
-	case 2:
-		return "image"
-	case 3:
-		return "voice"
-	case 4:
-		return "file"
-	case 5:
-		return "video"
-	default:
-		return "text"
+func extractContent(payload json.RawMessage) string {
+	var p struct {
+		Content string `json:"content"`
 	}
+	json.Unmarshal(payload, &p)
+	return p.Content
 }
 
-// SetupUpstreamHandler creates the handler for messages from sub-level clients.
+// SetupUpstreamHandler creates the handler for messages from channel clients.
 func (s *Server) SetupUpstreamHandler() relay.UpstreamHandler {
 	return func(conn *relay.Conn, env relay.Envelope) {
 		switch env.Type {
@@ -97,28 +91,30 @@ func (s *Server) SetupUpstreamHandler() relay.UpstreamHandler {
 				return
 			}
 
-			inst, ok := s.BotManager.GetInstance(conn.BotDBID)
+			inst, ok := s.BotManager.GetInstance(conn.BotID)
 			if !ok {
 				conn.Send(relay.NewAck(env.ReqID, false, "", "bot not connected"))
 				return
 			}
 
-			clientID, err := inst.SendText(context.Background(), data.ToUserID, data.Text)
+			clientID, err := inst.Send(context.Background(), provider.OutboundMessage{
+				Recipient: data.Recipient,
+				Text:      data.Text,
+			})
 			if err != nil {
 				conn.Send(relay.NewAck(env.ReqID, false, "", err.Error()))
 				return
 			}
 
-			// Log outbound
-			sublevelID := conn.SublevelID
+			channelID := conn.ChannelID
+			payload, _ := json.Marshal(map[string]string{"content": data.Text})
 			s.DB.SaveMessage(&database.Message{
-				BotDBID:     conn.BotDBID,
-				Direction:   "outbound",
-				FromUserID:  "",
-				ToUserID:    data.ToUserID,
-				MessageType: 1,
-				Content:     data.Text,
-				SublevelID:  &sublevelID,
+				BotID:     conn.BotID,
+				ChannelID: &channelID,
+				Direction: "outbound",
+				Recipient: data.Recipient,
+				MsgType:   "text",
+				Payload:   payload,
 			})
 			conn.Send(relay.NewAck(env.ReqID, true, clientID, ""))
 

@@ -18,6 +18,10 @@ services:
       DATABASE_URL: postgres://openilink:openilink@postgres:5432/openilink?sslmode=disable
       RP_ORIGIN: http://localhost:9800
       RP_ID: localhost
+      # GITHUB_CLIENT_ID:
+      # GITHUB_CLIENT_SECRET:
+      # LINUXDO_CLIENT_ID:
+      # LINUXDO_CLIENT_SECRET:
     depends_on:
       - postgres
 

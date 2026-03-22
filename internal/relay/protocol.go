@@ -13,8 +13,8 @@ type Envelope struct {
 
 type MessageData struct {
 	SeqID        int64         `json:"seq_id"`
-	MessageID    int64         `json:"message_id"`
-	FromUserID   string        `json:"from_user_id"`
+	ExternalID   string        `json:"external_id,omitempty"`
+	Sender       string        `json:"sender"`
 	Timestamp    int64         `json:"timestamp"`
 	Items        []MessageItem `json:"items"`
 	ContextToken string        `json:"context_token,omitempty"`
@@ -22,10 +22,10 @@ type MessageData struct {
 }
 
 type InitData struct {
-	SublevelID   string `json:"sublevel_id"`
-	SublevelName string `json:"sublevel_name"`
-	BotDBID      string `json:"bot_db_id"`
-	BotStatus    string `json:"bot_status"`
+	ChannelID   string `json:"channel_id"`
+	ChannelName string `json:"channel_name"`
+	BotID       string `json:"bot_id"`
+	BotStatus   string `json:"bot_status"`
 }
 
 type MessageItem struct {
@@ -54,13 +54,13 @@ type ErrorData struct {
 // --- Client → Server ---
 
 type SendTextData struct {
-	ToUserID string `json:"to_user_id"`
-	Text     string `json:"text"`
+	Recipient string `json:"recipient"`
+	Text      string `json:"text"`
 }
 
 type SendTypingData struct {
-	ToUserID string `json:"to_user_id"`
-	Status   string `json:"status"` // "typing" or "cancel"
+	Recipient string `json:"recipient"`
+	Status    string `json:"status"` // "typing" or "cancel"
 }
 
 // Helpers to build envelopes

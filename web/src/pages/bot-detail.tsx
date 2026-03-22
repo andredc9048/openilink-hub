@@ -6,12 +6,17 @@ import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import { api } from "../lib/api";
 
-type Message = { id: number; direction: string; from_user_id: string; to_user_id: string; content: string; created_at: number };
+type Message = { id: number; direction: string; sender: string; recipient: string; msg_type: string; payload: any; created_at: number };
+
+function getContent(m: Message): string {
+  if (m.payload?.content) return m.payload.content;
+  return `[${m.msg_type}]`;
+}
 
 export function BotDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [bot, setBot] = useState<any>(null);
-  const [subs, setSubs] = useState<any[]>([]);
+  const [channels, setChannels] = useState<any[]>([]);
   const [tab, setTab] = useState<"chat" | "channels">("chat");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -24,9 +29,9 @@ export function BotDetailPage() {
     setBot((bots || []).find((b: any) => b.id === id) || null);
   }
 
-  async function loadSubs() {
-    const all = await api.listSublevels();
-    setSubs((all || []).filter((s: any) => s.bot_db_id === id));
+  async function loadChannels() {
+    const all = await api.listChannels();
+    setChannels((all || []).filter((c: any) => c.bot_id === id));
   }
 
   async function loadMessages() {
@@ -35,7 +40,7 @@ export function BotDetailPage() {
     setMessages((data || []).reverse());
   }
 
-  useEffect(() => { loadBot(); loadSubs(); loadMessages(); }, [id]);
+  useEffect(() => { loadBot(); loadChannels(); loadMessages(); }, [id]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
   useEffect(() => {
     const t = setInterval(loadMessages, 5000);
@@ -85,7 +90,7 @@ export function BotDetailPage() {
         </Link>
         <div className="flex-1 min-w-0">
           <h2 className="font-semibold text-sm">{bot.name}</h2>
-          <p className="text-xs text-[var(--muted-foreground)] font-mono truncate">{bot.bot_id}</p>
+          <p className="text-xs text-[var(--muted-foreground)] font-mono truncate">{bot.extra?.bot_id}</p>
         </div>
         <Badge variant={bot.status === "connected" ? "default" : "outline"}>{bot.status}</Badge>
         <div className="flex border border-[var(--border)] rounded-lg overflow-hidden">
@@ -105,7 +110,7 @@ export function BotDetailPage() {
                   <div className={`max-w-[75%] px-3 py-2 rounded-xl text-sm ${
                     isIn ? "bg-[var(--secondary)] rounded-bl-sm" : "bg-[var(--primary)] text-[var(--primary-foreground)] rounded-br-sm"
                   }`}>
-                    {m.content}
+                    {getContent(m)}
                     <div className={`text-[10px] mt-1 ${isIn ? "text-[var(--muted-foreground)]" : "opacity-50"}`}>
                       {new Date(m.created_at * 1000).toLocaleTimeString()}
                     </div>
@@ -138,13 +143,13 @@ export function BotDetailPage() {
           </form>
         </div>
       ) : (
-        <ChannelsTab botId={id!} subs={subs} onRefresh={loadSubs} />
+        <ChannelsTab botId={id!} channels={channels} onRefresh={loadChannels} />
       )}
     </div>
   );
 }
 
-function ChannelsTab({ botId, subs, onRefresh }: { botId: string; subs: any[]; onRefresh: () => void }) {
+function ChannelsTab({ botId, channels, onRefresh }: { botId: string; channels: any[]; onRefresh: () => void }) {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [showDocs, setShowDocs] = useState(false);
@@ -152,7 +157,7 @@ function ChannelsTab({ botId, subs, onRefresh }: { botId: string; subs: any[]; o
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!name) return;
-    await api.createSublevel(botId, name);
+    await api.createChannel(botId, name);
     setName("");
     setCreating(false);
     onRefresh();
@@ -160,7 +165,7 @@ function ChannelsTab({ botId, subs, onRefresh }: { botId: string; subs: any[]; o
 
   return (
     <div className="space-y-3 mt-4">
-      {subs.map((sub) => <SubRow key={sub.id} sub={sub} onRefresh={onRefresh} />)}
+      {channels.map((ch) => <ChannelRow key={ch.id} channel={ch} onRefresh={onRefresh} />)}
       {creating ? (
         <form onSubmit={handleCreate} className="flex gap-2">
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="通道名称" className="h-8 text-sm" autoFocus />
@@ -192,22 +197,21 @@ function WsProtocolDocs() {
         <pre className="bg-[var(--card)] p-2 rounded overflow-x-auto">{`{
   "type": "init",
   "data": {
-    "sublevel_id": "uuid",
-    "sublevel_name": "通道名",
-    "bot_db_id": "uuid",
+    "channel_id": "uuid",
+    "channel_name": "通道名",
+    "bot_id": "uuid",
     "bot_status": "connected"
   }
 }`}</pre>
       </div>
 
       <div>
-        <p className="font-medium text-[var(--foreground)] mt-3 mb-1">收到微信消息：message</p>
+        <p className="font-medium text-[var(--foreground)] mt-3 mb-1">收到消息：message</p>
         <pre className="bg-[var(--card)] p-2 rounded overflow-x-auto">{`{
   "type": "message",
   "data": {
     "seq_id": 123,
-    "message_id": 456,
-    "from_user_id": "xxx@im.wechat",
+    "sender": "xxx@im.wechat",
     "timestamp": 1711100000000,
     "items": [
       { "type": "text", "text": "你好" },
@@ -235,7 +239,7 @@ function WsProtocolDocs() {
   "type": "send_text",
   "req_id": "自定义请求ID",
   "data": {
-    "to_user_id": "xxx@im.wechat",
+    "recipient": "xxx@im.wechat",
     "text": "回复内容"
   }
 }`}</pre>
@@ -267,15 +271,15 @@ function WsProtocolDocs() {
   );
 }
 
-function SubRow({ sub, onRefresh }: { sub: any; onRefresh: () => void }) {
+function ChannelRow({ channel, onRefresh }: { channel: any; onRefresh: () => void }) {
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedWs, setCopiedWs] = useState(false);
 
   const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${wsProto}//${location.host}/api/ws?key=${sub.api_key}`;
+  const wsUrl = `${wsProto}//${location.host}/api/ws?key=${channel.api_key}`;
 
   function copyKey() {
-    navigator.clipboard.writeText(sub.api_key);
+    navigator.clipboard.writeText(channel.api_key);
     setCopiedKey(true);
     setTimeout(() => setCopiedKey(false), 2000);
   }
@@ -290,19 +294,19 @@ function SubRow({ sub, onRefresh }: { sub: any; onRefresh: () => void }) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Cable className="w-3.5 h-3.5 text-[var(--muted-foreground)]" />
-          <span className="text-sm font-medium">{sub.name}</span>
+          <span className="text-sm font-medium">{channel.name}</span>
         </div>
         <div className="flex gap-1 shrink-0">
-          <Button variant="ghost" size="sm" onClick={async () => { if (confirm("重新生成 Key？")) { await api.rotateKey(sub.id); onRefresh(); } }}>
+          <Button variant="ghost" size="sm" onClick={async () => { if (confirm("重新生成 Key？")) { await api.rotateKey(channel.id); onRefresh(); } }}>
             <RotateCw className="w-3.5 h-3.5" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={async () => { if (confirm("删除？")) { await api.deleteSublevel(sub.id); onRefresh(); } }}>
+          <Button variant="ghost" size="sm" onClick={async () => { if (confirm("删除？")) { await api.deleteChannel(channel.id); onRefresh(); } }}>
             <Trash2 className="w-3.5 h-3.5 text-[var(--destructive)]" />
           </Button>
         </div>
       </div>
 
-      <CopyRow label="API Key" value={sub.api_key} copied={copiedKey} onCopy={copyKey} />
+      <CopyRow label="API Key" value={channel.api_key} copied={copiedKey} onCopy={copyKey} />
       <CopyRow label="WebSocket" value={wsUrl} copied={copiedWs} onCopy={copyWs} />
     </div>
   );
