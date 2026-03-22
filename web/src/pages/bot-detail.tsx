@@ -6,33 +6,70 @@ import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import { api } from "../lib/api";
 
-type Message = { id: number; bot_id?: string; direction: string; sender: string; recipient: string; msg_type: string; payload: any; created_at: number };
+type MessageItem = { type: string; text?: string; file_name?: string };
+type Message = {
+  id: number; bot_id?: string; direction: string;
+  from_user_id: string; to_user_id: string;
+  message_type: number; item_list: MessageItem[];
+  media_status?: string; media_keys?: Record<string, string>;
+  created_at: number;
+  // Optimistic UI fields (client-only)
+  _sending?: boolean; _error?: string; _preview_url?: string;
+};
 
-function getMediaUrl(m: Message): string | null {
-  if (m.payload?.media_key) {
-    return `/api/v1/media/${m.payload.media_key}`;
+function getMediaUrl(m: Message, index: number): string | null {
+  const key = m.media_keys?.[String(index)];
+  if (key) return `/api/v1/media/${key}`;
+  return null;
+}
+
+function getItemMediaType(item: MessageItem): string {
+  return item.type || "text";
+}
+
+function ItemContent({ item, m, index }: { item: MessageItem; m: Message; index: number }) {
+  const mediaType = getItemMediaType(item);
+  const url = getMediaUrl(m, index);
+
+  if (mediaType === "image" && url) {
+    return <img src={url} alt="image" className="max-w-full rounded-lg max-h-48 cursor-pointer" onClick={() => window.open(url)} />;
   }
-  if (m.payload?.media_url) {
-    return m.payload.media_url;
+  if (mediaType === "video" && url) {
+    return <video src={url} controls className="max-w-full rounded-lg max-h-48" />;
   }
+  if (mediaType === "voice" && url) {
+    return (
+      <div className="space-y-1">
+        <audio src={url} controls className="h-8" />
+        {item.text && item.text !== "[voice]" && <p className="text-xs opacity-70">{item.text}</p>}
+      </div>
+    );
+  }
+  if (mediaType === "file" && url) {
+    return (
+      <a href={url} target="_blank" rel="noopener" className="flex items-center gap-2 underline text-xs">
+        📎 {item.file_name || item.text || "下载文件"}
+      </a>
+    );
+  }
+  if (item.text) return <>{item.text}</>;
+  if (mediaType !== "text") return <span className="text-muted-foreground">[{mediaType}]</span>;
   return null;
 }
 
 function MessageContent({ m }: { m: Message }) {
-  const url = getMediaUrl(m);
-  const content = m.payload?.content;
-  const mediaType = m.payload?.media_type || m.msg_type;
-  const mediaStatus = m.payload?.media_status;
-
-  if (mediaStatus === "downloading") {
+  // Media downloading/failed status (applies to entire message)
+  if (m.media_status === "downloading") {
+    const firstMedia = (m.item_list || []).find((i) => i.type !== "text");
+    const t = firstMedia?.type || "file";
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="animate-pulse">⏳</span>
-        {mediaType === "image" ? "图片下载中..." : mediaType === "video" ? "视频下载中..." : mediaType === "voice" ? "语音下载中..." : "文件下载中..."}
+        {t === "image" ? "图片下载中..." : t === "video" ? "视频下载中..." : t === "voice" ? "语音下载中..." : "文件下载中..."}
       </div>
     );
   }
-  if (mediaStatus === "failed") {
+  if (m.media_status === "failed") {
     return (
       <div className="space-y-1">
         <div className="flex items-center gap-2 text-xs">
@@ -54,28 +91,23 @@ function MessageContent({ m }: { m: Message }) {
     );
   }
 
-  if (url && mediaType === "image") {
-    return <img src={url} alt="image" className="max-w-full rounded-lg max-h-48 cursor-pointer" onClick={() => window.open(url)} />;
+  // Optimistic preview for sending media
+  if (m._preview_url && m._sending) {
+    const t = (m.item_list || [])[0]?.type || "file";
+    if (t === "image") return <img src={m._preview_url} alt="preview" className="max-w-full rounded-lg max-h-48 opacity-60" />;
+    if (t === "video") return <video src={m._preview_url} className="max-w-full rounded-lg max-h-48 opacity-60" />;
   }
-  if (url && mediaType === "video") {
-    return <video src={url} controls className="max-w-full rounded-lg max-h-48" />;
-  }
-  if (url && (mediaType === "voice" || mediaType === "audio")) {
-    return (
-      <div className="space-y-1">
-        <audio src={url} controls className="h-8" />
-        {content && content !== "[voice]" && <p className="text-xs opacity-70">{content}</p>}
-      </div>
-    );
-  }
-  if (url && mediaType === "file") {
-    return (
-      <a href={url} target="_blank" rel="noopener" className="flex items-center gap-2 underline text-xs">
-        📎 {content || "下载文件"}
-      </a>
-    );
-  }
-  return <>{content || `[${m.msg_type}]`}</>;
+
+  const items = m.item_list || [];
+  if (items.length === 0) return <span className="text-muted-foreground">[空消息]</span>;
+
+  return (
+    <div className="space-y-1">
+      {items.map((item, i) => (
+        <ItemContent key={i} item={item} m={m} index={i} />
+      ))}
+    </div>
+  );
 }
 
 export function BotDetailPage() {
@@ -147,7 +179,7 @@ export function BotDetailPage() {
       const res = await api.messages(id, 30);
       const fresh = (res.messages || []).reverse();
       setMessages((prev) => {
-        // Merge: keep optimistic (negative ids), replace rest with fresh
+        // Merge: keep optimistic (negative ids, still sending), replace rest with fresh
         const optimistic = prev.filter((m) => m.id < 0);
         return [...fresh, ...optimistic];
       });
@@ -164,15 +196,15 @@ export function BotDetailPage() {
     if (!input.trim() || !id) return;
     const optId = -Date.now();
     setMessages((prev) => [...prev, {
-      id: optId, direction: "outbound", sender: "", recipient: "",
-      msg_type: "text", payload: { content: input, _sending: true },
-      created_at: Date.now() / 1000,
+      id: optId, direction: "outbound", from_user_id: "", to_user_id: "",
+      message_type: 2, item_list: [{ type: "text", text: input }],
+      created_at: Date.now() / 1000, _sending: true,
     }]);
     const text = input;
     setInput("");
     const err = await doSend({ text });
     setMessages((prev) => prev.map((m) => m.id === optId
-      ? { ...m, payload: { ...m.payload, _sending: false, _error: err || undefined } }
+      ? { ...m, _sending: false, _error: err || undefined }
       : m));
   }
 
@@ -203,16 +235,11 @@ export function BotDetailPage() {
     const optId = -Date.now();
     const mediaType = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "file";
     setMessages((prev) => [...prev, {
-      id: optId, direction: "outbound", sender: "", recipient: "",
-      msg_type: mediaType,
-      payload: {
-        content: caption || file.name,
-        media_url: preview || undefined,
-        media_type: mediaType,
-        media_status: "ready",
-        _sending: true,
-      },
+      id: optId, direction: "outbound", from_user_id: "", to_user_id: "",
+      message_type: 2,
+      item_list: [{ type: mediaType, text: caption || file.name, file_name: file.name }],
       created_at: Date.now() / 1000,
+      _sending: true, _preview_url: preview || undefined,
     }]);
 
     const form = new FormData();
@@ -223,18 +250,19 @@ export function BotDetailPage() {
     setPendingPreview(null);
     const err = await doSend(form);
     setMessages((prev) => prev.map((m) => m.id === optId
-      ? { ...m, payload: { ...m.payload, _sending: false, _error: err || undefined } }
+      ? { ...m, _sending: false, _error: err || undefined }
       : m));
   }
 
   async function retrySend(m: Message) {
     const optId = m.id;
     setMessages((prev) => prev.map((msg) => msg.id === optId
-      ? { ...msg, payload: { ...msg.payload, _sending: true, _error: undefined } }
+      ? { ...msg, _sending: true, _error: undefined }
       : msg));
-    const err = await doSend({ text: m.payload?.content || "" });
+    const textItem = (m.item_list || []).find((i) => i.text);
+    const err = await doSend({ text: textItem?.text || "" });
     setMessages((prev) => prev.map((msg) => msg.id === optId
-      ? { ...msg, payload: { ...msg.payload, _sending: false, _error: err || undefined } }
+      ? { ...msg, _sending: false, _error: err || undefined }
       : msg));
   }
 
@@ -326,18 +354,16 @@ export function BotDetailPage() {
             )}
             {messages.map((m) => {
               const isIn = m.direction === "inbound";
-              const isSending = m.payload?._sending;
-              const sendErr = m.payload?._error;
               return (
                 <div key={m.id} className={`flex ${isIn ? "justify-start" : "justify-end"}`}>
                   <div className={`max-w-[75%] px-3 py-2 rounded-xl text-sm ${
                     isIn ? "bg-secondary rounded-bl-sm" : "bg-primary text-primary-foreground rounded-br-sm"
-                  } ${isSending ? "opacity-60" : ""}`}>
+                  } ${m._sending ? "opacity-60" : ""}`}>
                     <MessageContent m={m} />
                     <div className={`text-[10px] mt-1 ${isIn ? "text-muted-foreground" : "opacity-50"}`}>
-                      {isSending ? "发送中..." : sendErr ? (
+                      {m._sending ? "发送中..." : m._error ? (
                         <span className="text-destructive">
-                          {sendErr}
+                          {m._error}
                           <button className="ml-2 underline cursor-pointer" onClick={(e) => { e.stopPropagation(); retrySend(m); }}>重试</button>
                         </span>
                       ) : new Date(m.created_at * 1000).toLocaleTimeString()}
