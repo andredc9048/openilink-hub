@@ -58,6 +58,7 @@ func main() {
 	sinks := []sink.Sink{
 		&sink.WS{Hub: hub},
 		&sink.AI{DB: db},
+		&sink.Webhook{},
 	}
 	mgr := bot.NewManager(db, hub, sinks)
 	srv.BotManager = mgr

@@ -9,6 +9,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,6 +75,7 @@ func setup(t *testing.T) *testEnv {
 	sinks := []sink.Sink{
 		&sink.WS{Hub: hub},
 		&sink.AI{DB: db},
+		&sink.Webhook{},
 	}
 	mgr := bot.NewManager(db, hub, sinks)
 	server.BotManager = mgr
@@ -1449,11 +1451,139 @@ func TestChannelHTTPDisabledChannel(t *testing.T) {
 	botObj := env.createBotForUser("Bot1")
 	ch, _ := env.db.CreateChannel(botObj.ID, "DisChan", "", nil, nil)
 
-	env.db.UpdateChannel(ch.ID, ch.Name, ch.Handle, &ch.FilterRule, &ch.AIConfig, false)
+	env.db.UpdateChannel(ch.ID, ch.Name, ch.Handle, &ch.FilterRule, &ch.AIConfig, ch.WebhookURL, ch.WebhookSecret, false)
 
 	resp := httpGet(t, env.srv.URL+"/api/v1/channels/status?key="+ch.APIKey)
 	assertCode(t, "disabled channel", resp.StatusCode, 401)
 	resp.Body.Close()
+}
+
+// ==================== Webhook sink ====================
+
+func TestWebhookDelivery(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	// Set up a webhook receiver
+	var received []map[string]any
+	var receivedHeaders http.Header
+	hookSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedHeaders = r.Header
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		received = append(received, body)
+		w.WriteHeader(200)
+	}))
+	defer hookSrv.Close()
+
+	env.register("hookuser", "password123")
+	botObj := env.createBotForUser("Bot1")
+	env.mgr.StartBot(context.Background(), botObj)
+
+	// Create channel with webhook
+	ch, _ := env.db.CreateChannel(botObj.ID, "HookChan", "", nil, nil)
+	env.db.UpdateChannel(ch.ID, ch.Name, ch.Handle, &ch.FilterRule, &ch.AIConfig,
+		hookSrv.URL, "bearer:test-token", true)
+
+	inst, _ := env.mgr.GetInstance(botObj.ID)
+	mock := inst.Provider.(*mockProvider.Provider)
+
+	mock.SimulateInbound(provider.InboundMessage{
+		ExternalID: "500", Sender: "hook@wx", Timestamp: time.Now().UnixMilli(),
+		Items: []provider.MessageItem{{Type: "text", Text: "webhook test"}},
+	})
+
+	// Wait for async webhook delivery
+	time.Sleep(500 * time.Millisecond)
+
+	if len(received) != 1 {
+		t.Fatalf("want 1 webhook delivery, got %d", len(received))
+	}
+
+	msg := received[0]
+	if msg["event"] != "message" {
+		t.Errorf("event = %v", msg["event"])
+	}
+	if msg["sender"] != "hook@wx" {
+		t.Errorf("sender = %v", msg["sender"])
+	}
+	if msg["content"] != "webhook test" {
+		t.Errorf("content = %v", msg["content"])
+	}
+	if msg["channel_id"] != ch.ID {
+		t.Errorf("channel_id = %v, want %s", msg["channel_id"], ch.ID)
+	}
+
+	// Verify bearer auth header
+	auth := receivedHeaders.Get("Authorization")
+	if auth != "Bearer test-token" {
+		t.Errorf("Authorization = %q, want Bearer test-token", auth)
+	}
+}
+
+func TestWebhookHMACSignature(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	var signature string
+	hookSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		signature = r.Header.Get("X-Hub-Signature")
+		w.WriteHeader(200)
+	}))
+	defer hookSrv.Close()
+
+	env.register("hmacuser", "password123")
+	botObj := env.createBotForUser("Bot1")
+	env.mgr.StartBot(context.Background(), botObj)
+
+	ch, _ := env.db.CreateChannel(botObj.ID, "HmacChan", "", nil, nil)
+	env.db.UpdateChannel(ch.ID, ch.Name, ch.Handle, &ch.FilterRule, &ch.AIConfig,
+		hookSrv.URL, "hmac:my-secret", true)
+
+	inst, _ := env.mgr.GetInstance(botObj.ID)
+	mock := inst.Provider.(*mockProvider.Provider)
+
+	mock.SimulateInbound(provider.InboundMessage{
+		ExternalID: "600", Sender: "hmac@wx", Timestamp: time.Now().UnixMilli(),
+		Items: []provider.MessageItem{{Type: "text", Text: "signed"}},
+	})
+
+	time.Sleep(500 * time.Millisecond)
+
+	if !strings.HasPrefix(signature, "sha256=") {
+		t.Errorf("signature = %q, want sha256=...", signature)
+	}
+	if len(signature) != 7+64 { // "sha256=" + 64 hex chars
+		t.Errorf("signature length = %d", len(signature))
+	}
+}
+
+func TestWebhookNotTriggeredWithoutURL(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("nohook", "password123")
+	botObj := env.createBotForUser("Bot1")
+	env.mgr.StartBot(context.Background(), botObj)
+
+	// Channel without webhook
+	ch, _ := env.db.CreateChannel(botObj.ID, "NoHook", "", nil, nil)
+	ws := env.connectWS(t, ch.APIKey)
+	defer ws.Close()
+	readWS(t, ws)
+
+	inst, _ := env.mgr.GetInstance(botObj.ID)
+	mock := inst.Provider.(*mockProvider.Provider)
+
+	mock.SimulateInbound(provider.InboundMessage{
+		ExternalID: "700", Sender: "u@wx", Timestamp: time.Now().UnixMilli(),
+		Items: []provider.MessageItem{{Type: "text", Text: "no hook"}},
+	})
+
+	// WS should still receive
+	if readWSTimeout(t, ws, 2*time.Second) == nil {
+		t.Error("WS should still receive without webhook")
+	}
 }
 
 // ==================== AI context isolation ====================

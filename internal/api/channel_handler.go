@@ -80,11 +80,13 @@ func (s *Server) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name       string              `json:"name"`
-		Handle     *string             `json:"handle"`
-		FilterRule *database.FilterRule `json:"filter_rule"`
-		AIConfig   *database.AIConfig  `json:"ai_config"`
-		Enabled    *bool               `json:"enabled"`
+		Name          string              `json:"name"`
+		Handle        *string             `json:"handle"`
+		FilterRule    *database.FilterRule `json:"filter_rule"`
+		AIConfig      *database.AIConfig  `json:"ai_config"`
+		WebhookURL    *string             `json:"webhook_url"`
+		WebhookSecret *string             `json:"webhook_secret"`
+		Enabled       *bool               `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid request", http.StatusBadRequest)
@@ -107,12 +109,20 @@ func (s *Server) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 	if req.AIConfig != nil {
 		ai = req.AIConfig
 	}
+	webhookURL := ch.WebhookURL
+	if req.WebhookURL != nil {
+		webhookURL = *req.WebhookURL
+	}
+	webhookSecret := ch.WebhookSecret
+	if req.WebhookSecret != nil {
+		webhookSecret = *req.WebhookSecret
+	}
 	enabled := ch.Enabled
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
 
-	if err := s.DB.UpdateChannel(cid, name, handle, filter, ai, enabled); err != nil {
+	if err := s.DB.UpdateChannel(cid, name, handle, filter, ai, webhookURL, webhookSecret, enabled); err != nil {
 		jsonError(w, "update failed", http.StatusInternalServerError)
 		return
 	}

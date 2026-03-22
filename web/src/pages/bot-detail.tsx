@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Send, Cable, Copy, Check, Plus, Trash2, RotateCw, Radio, X, Bot, Settings2 } from "lucide-react";
+import { ArrowLeft, Send, Cable, Copy, Check, Plus, Trash2, RotateCw, Radio, X, Bot, Webhook } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
@@ -306,6 +306,7 @@ function ChannelRow({ botId, channel, onRefresh }: { botId: string; channel: any
   const [copiedHttp, setCopiedHttp] = useState(false);
   const [showLive, setShowLive] = useState(false);
   const [showAI, setShowAI] = useState(false);
+  const [showWebhook, setShowWebhook] = useState(false);
   const [editingHandle, setEditingHandle] = useState(false);
   const [handleVal, setHandleVal] = useState(channel.handle || "");
 
@@ -366,10 +367,18 @@ function ChannelRow({ botId, channel, onRefresh }: { botId: string; channel: any
               <Bot className="w-2.5 h-2.5" /> AI
             </span>
           )}
+          {channel.webhook_url && (
+            <span className="text-[10px] text-primary bg-primary/10 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+              <Webhook className="w-2.5 h-2.5" /> Webhook
+            </span>
+          )}
         </div>
         <div className="flex gap-1 shrink-0">
           <Button variant={showAI ? "default" : "ghost"} size="sm" onClick={() => setShowAI(!showAI)} title="AI 配置">
             <Bot className="w-3.5 h-3.5" />
+          </Button>
+          <Button variant={showWebhook ? "default" : "ghost"} size="sm" onClick={() => setShowWebhook(!showWebhook)} title="Webhook">
+            <Webhook className="w-3.5 h-3.5" />
           </Button>
           <Button variant={showLive ? "default" : "ghost"} size="sm" onClick={() => setShowLive(!showLive)} title="实时监听">
             <Radio className="w-3.5 h-3.5" />
@@ -388,6 +397,7 @@ function ChannelRow({ botId, channel, onRefresh }: { botId: string; channel: any
       <CopyRow label="HTTP API" value={httpBase} copied={copiedHttp} onCopy={copyHttp} />
 
       {showAI && <AIConfigPanel botId={botId} channelId={channel.id} config={channel.ai_config} onSaved={onRefresh} />}
+      {showWebhook && <WebhookPanel botId={botId} channelId={channel.id} url={channel.webhook_url} secret={channel.webhook_secret} onSaved={onRefresh} />}
       {showLive && <LivePanel wsUrl={wsUrl} onClose={() => setShowLive(false)} />}
     </div>
   );
@@ -512,6 +522,61 @@ type WsLogEntry = {
   data: any;
   time: string;
 };
+
+function WebhookPanel({ botId, channelId, url, secret, onSaved }: {
+  botId: string; channelId: string; url: string; secret: string; onSaved: () => void;
+}) {
+  const [webhookUrl, setWebhookUrl] = useState(url || "");
+  const [webhookSecret, setWebhookSecret] = useState(secret || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSave() {
+    setSaving(true);
+    setError("");
+    try {
+      await api.updateChannel(botId, channelId, {
+        webhook_url: webhookUrl,
+        webhook_secret: webhookSecret,
+      });
+      onSaved();
+    } catch (err: any) { setError(err.message); }
+    setSaving(false);
+  }
+
+  return (
+    <div className="border rounded-lg bg-background p-3 space-y-3">
+      <span className="text-xs font-medium flex items-center gap-1.5">
+        <Webhook className="w-3.5 h-3.5" /> Webhook 推送
+      </span>
+      <div className="space-y-2">
+        <Input
+          placeholder="https://your-server.com/webhook"
+          value={webhookUrl}
+          onChange={(e) => setWebhookUrl(e.target.value)}
+          className="h-7 text-[11px] font-mono"
+        />
+        <Input
+          placeholder="认证（可选）bearer:token / header:Key:Value / hmac:secret"
+          value={webhookSecret}
+          onChange={(e) => setWebhookSecret(e.target.value)}
+          className="h-7 text-[11px] font-mono"
+        />
+      </div>
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] text-muted-foreground">
+          收到消息时 POST JSON 到此 URL。留空关闭。
+        </p>
+        <div className="flex items-center gap-2">
+          {error && <span className="text-[10px] text-destructive">{error}</span>}
+          <Button size="sm" className="h-7" onClick={handleSave} disabled={saving}>
+            {saving ? "..." : "保存"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function LivePanel({ wsUrl, onClose }: { wsUrl: string; onClose: () => void }) {
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
