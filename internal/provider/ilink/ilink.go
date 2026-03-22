@@ -81,9 +81,17 @@ func (p *Provider) Start(ctx context.Context, opts provider.StartOptions) error 
 	}
 
 	go func() {
+		// Cache last raw response body for attaching to inbound messages
+		var lastRawBody []byte
+
 		err := p.client.Monitor(ctx, func(msg ilink.WeixinMessage) {
 			if opts.OnMessage != nil {
-				opts.OnMessage(convertInbound(msg))
+				im := convertInbound(msg)
+				// Attach raw HTTP response body (contains all messages from this poll)
+				if lastRawBody != nil {
+					im.Raw = json.RawMessage(lastRawBody)
+				}
+				opts.OnMessage(im)
 			}
 		}, &ilink.MonitorOptions{
 			InitialBuf: ss.SyncBuf,
@@ -101,6 +109,11 @@ func (p *Provider) Start(ctx context.Context, opts provider.StartOptions) error 
 				p.status.Store("session_expired")
 				if opts.OnStatus != nil {
 					opts.OnStatus("session_expired")
+				}
+			},
+			OnResponse: func(resp *ilink.GetUpdatesResp) {
+				if raw := resp.RawResponse(); raw != nil {
+					lastRawBody = raw.Body
 				}
 			},
 		})
@@ -264,9 +277,6 @@ func convertInbound(msg ilink.WeixinMessage) provider.InboundMessage {
 		}
 	}
 
-	// Store the original WeixinMessage as raw JSON
-	raw, _ := json.Marshal(msg)
-
 	return provider.InboundMessage{
 		ExternalID:   fmt.Sprintf("%d", msg.MessageID),
 		Sender:       msg.FromUserID,
@@ -277,7 +287,7 @@ func convertInbound(msg ilink.WeixinMessage) provider.InboundMessage {
 		Items:        items,
 		ContextToken: msg.ContextToken,
 		SessionID:    msg.SessionID,
-		Raw:          raw,
+		// Raw is set by Monitor callback from OnResponse
 	}
 }
 
