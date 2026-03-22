@@ -15,11 +15,22 @@ type FilterRule struct {
 	MessageTypes []string `json:"message_types,omitempty"` // "text","image","voice","file","video"
 }
 
+// AIConfig holds optional AI auto-reply configuration for a channel.
+type AIConfig struct {
+	Enabled      bool   `json:"enabled"`
+	BaseURL      string `json:"base_url,omitempty"`      // default: https://api.openai.com/v1
+	APIKey       string `json:"api_key,omitempty"`
+	Model        string `json:"model,omitempty"`          // default: gpt-4o-mini
+	SystemPrompt string `json:"system_prompt,omitempty"`
+	MaxHistory   int    `json:"max_history,omitempty"`    // context messages, default: 20
+}
+
 type Channel struct {
 	ID         string     `json:"id"`
 	BotID      string     `json:"bot_id"`
 	Name       string     `json:"name"`
-	Handle     string     `json:"handle"` // @mention handle for routing
+	Handle     string     `json:"handle"`
+	AIConfig   AIConfig   `json:"ai_config"`
 	APIKey     string     `json:"api_key"`
 	FilterRule FilterRule `json:"filter_rule"`
 	Enabled    bool       `json:"enabled"`
@@ -34,37 +45,42 @@ func generateAPIKey() string {
 	return hex.EncodeToString(b)
 }
 
-const channelSelectCols = `id, bot_id, name, handle, api_key, filter_rule, enabled, last_seq,
+const channelSelectCols = `id, bot_id, name, handle, ai_config, api_key, filter_rule, enabled, last_seq,
 	EXTRACT(EPOCH FROM created_at)::BIGINT, EXTRACT(EPOCH FROM updated_at)::BIGINT`
 
 func scanChannel(scanner interface{ Scan(...any) error }) (*Channel, error) {
 	c := &Channel{}
-	var filterJSON []byte
-	err := scanner.Scan(&c.ID, &c.BotID, &c.Name, &c.Handle, &c.APIKey,
+	var filterJSON, aiJSON []byte
+	err := scanner.Scan(&c.ID, &c.BotID, &c.Name, &c.Handle, &aiJSON, &c.APIKey,
 		&filterJSON, &c.Enabled, &c.LastSeq, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal(filterJSON, &c.FilterRule)
+	_ = json.Unmarshal(aiJSON, &c.AIConfig)
 	return c, nil
 }
 
-func (db *DB) CreateChannel(botID, name, handle string, filter *FilterRule) (*Channel, error) {
+func (db *DB) CreateChannel(botID, name, handle string, filter *FilterRule, ai *AIConfig) (*Channel, error) {
 	id := uuid.New().String()
 	apiKey := generateAPIKey()
 	if filter == nil {
 		filter = &FilterRule{}
 	}
+	if ai == nil {
+		ai = &AIConfig{}
+	}
 	filterJSON, _ := json.Marshal(filter)
+	aiJSON, _ := json.Marshal(ai)
 	_, err := db.Exec(
-		"INSERT INTO channels (id, bot_id, name, handle, api_key, filter_rule) VALUES ($1, $2, $3, $4, $5, $6)",
-		id, botID, name, handle, apiKey, filterJSON,
+		"INSERT INTO channels (id, bot_id, name, handle, ai_config, api_key, filter_rule) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+		id, botID, name, handle, aiJSON, apiKey, filterJSON,
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &Channel{ID: id, BotID: botID, Name: name, Handle: handle, APIKey: apiKey,
-		FilterRule: *filter, Enabled: true}, nil
+	return &Channel{ID: id, BotID: botID, Name: name, Handle: handle, AIConfig: *ai,
+		APIKey: apiKey, FilterRule: *filter, Enabled: true}, nil
 }
 
 func (db *DB) GetChannel(id string) (*Channel, error) {
@@ -124,11 +140,12 @@ func (db *DB) ListChannelsByBotIDs(botIDs []string) ([]Channel, error) {
 	return chs, rows.Err()
 }
 
-func (db *DB) UpdateChannel(id, name, handle string, filter *FilterRule, enabled bool) error {
+func (db *DB) UpdateChannel(id, name, handle string, filter *FilterRule, ai *AIConfig, enabled bool) error {
 	filterJSON, _ := json.Marshal(filter)
+	aiJSON, _ := json.Marshal(ai)
 	_, err := db.Exec(
-		"UPDATE channels SET name = $1, handle = $2, filter_rule = $3, enabled = $4, updated_at = NOW() WHERE id = $5",
-		name, handle, filterJSON, enabled, id,
+		"UPDATE channels SET name = $1, handle = $2, filter_rule = $3, ai_config = $4, enabled = $5, updated_at = NOW() WHERE id = $6",
+		name, handle, filterJSON, aiJSON, enabled, id,
 	)
 	return err
 }

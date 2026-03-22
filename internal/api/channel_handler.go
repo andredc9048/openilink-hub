@@ -39,6 +39,7 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		Name       string               `json:"name"`
 		Handle     string               `json:"handle"`
 		FilterRule *database.FilterRule  `json:"filter_rule,omitempty"`
+		AIConfig   *database.AIConfig   `json:"ai_config,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.BotID == "" || req.Name == "" {
 		jsonError(w, "bot_id and name required", http.StatusBadRequest)
@@ -52,7 +53,7 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ch, err := s.DB.CreateChannel(req.BotID, req.Name, req.Handle, req.FilterRule)
+	ch, err := s.DB.CreateChannel(req.BotID, req.Name, req.Handle, req.FilterRule, req.AIConfig)
 	if err != nil {
 		jsonError(w, "create failed", http.StatusInternalServerError)
 		return
@@ -84,6 +85,7 @@ func (s *Server) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 		Name       string              `json:"name"`
 		Handle     *string             `json:"handle"`
 		FilterRule *database.FilterRule `json:"filter_rule"`
+		AIConfig   *database.AIConfig  `json:"ai_config"`
 		Enabled    *bool               `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -103,12 +105,16 @@ func (s *Server) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 	if req.FilterRule != nil {
 		filter = req.FilterRule
 	}
+	ai := &ch.AIConfig
+	if req.AIConfig != nil {
+		ai = req.AIConfig
+	}
 	enabled := ch.Enabled
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
 
-	if err := s.DB.UpdateChannel(id, name, handle, filter, enabled); err != nil {
+	if err := s.DB.UpdateChannel(id, name, handle, filter, ai, enabled); err != nil {
 		jsonError(w, "update failed", http.StatusInternalServerError)
 		return
 	}

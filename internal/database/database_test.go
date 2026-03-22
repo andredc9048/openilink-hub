@@ -118,7 +118,7 @@ func TestChannelWithFilter(t *testing.T) {
 		UserIDs:  []string{"user-a", "user-b"},
 		Keywords: []string{"help"},
 	}
-	ch, err := db.CreateChannel(bot.ID, "Filtered", "filtered", filter)
+	ch, err := db.CreateChannel(bot.ID, "Filtered", "filtered", filter, nil)
 	if err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestChannelWithFilter(t *testing.T) {
 	}
 
 	newFilter := &FilterRule{MessageTypes: []string{"text", "image"}}
-	db.UpdateChannel(ch.ID, "Updated", "newhandle", newFilter, true)
+	db.UpdateChannel(ch.ID, "Updated", "newhandle", newFilter, nil, true)
 	got, _ = db.GetChannel(ch.ID)
 	if got.Name != "Updated" || got.Handle != "newhandle" || len(got.FilterRule.MessageTypes) != 2 {
 		t.Errorf("after update = %+v", got)

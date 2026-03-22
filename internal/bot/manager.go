@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/openilink/openilink-hub/internal/ai"
 	"github.com/openilink/openilink-hub/internal/database"
 	"github.com/openilink/openilink-hub/internal/provider"
 	"github.com/openilink/openilink-hub/internal/relay"
@@ -205,6 +206,7 @@ func (m *Manager) onInbound(inst *Instance, msg provider.InboundMessage) {
 
 	// If text contains @handle mentions, route only to mentioned channels
 	mentioned := parseMentions(content)
+	var matched []database.Channel
 	if len(mentioned) > 0 {
 		handleSet := make(map[string]bool, len(mentioned))
 		for _, h := range mentioned {
@@ -212,21 +214,63 @@ func (m *Manager) onInbound(inst *Instance, msg provider.InboundMessage) {
 		}
 		for _, ch := range channels {
 			if ch.Handle != "" && handleSet[strings.ToLower(ch.Handle)] {
-				m.hub.SendTo(ch.ID, env)
-				_ = m.db.UpdateChannelLastSeq(ch.ID, seqID)
+				matched = append(matched, ch)
 			}
 		}
+	} else {
+		// No @mention — use regular filter rules
+		for _, ch := range channels {
+			if matchFilter(ch.FilterRule, msg.Sender, content, msgType) {
+				matched = append(matched, ch)
+			}
+		}
+	}
+
+	// Deliver to matched channels + trigger AI auto-reply
+	for _, ch := range matched {
+		m.hub.SendTo(ch.ID, env)
+		_ = m.db.UpdateChannelLastSeq(ch.ID, seqID)
+
+		// AI auto-reply (only for text messages)
+		if ch.AIConfig.Enabled && ch.AIConfig.APIKey != "" && msgType == "text" && content != "" {
+			go m.aiReply(inst, ch, msg.Sender, content)
+		}
+	}
+}
+
+// aiReply calls the AI completion API and sends the reply through the bot.
+func (m *Manager) aiReply(inst *Instance, ch database.Channel, sender, text string) {
+	reply, err := ai.Complete(context.Background(), ch.AIConfig, m.db, inst.DBID, sender, text)
+	if err != nil {
+		slog.Error("ai completion failed", "channel", ch.ID, "err", err)
+		return
+	}
+	if reply == "" {
 		return
 	}
 
-	// No @mention — use regular filter rules
-	for _, ch := range channels {
-		if !matchFilter(ch.FilterRule, msg.Sender, content, msgType) {
-			continue
-		}
-		m.hub.SendTo(ch.ID, env)
-		_ = m.db.UpdateChannelLastSeq(ch.ID, seqID)
+	// Send reply through bot
+	_, err = inst.Send(context.Background(), provider.OutboundMessage{
+		Recipient: sender,
+		Text:      reply,
+	})
+	if err != nil {
+		slog.Error("ai reply send failed", "channel", ch.ID, "err", err)
+		return
 	}
+
+	// Save outbound message
+	chID := ch.ID
+	payload, _ := json.Marshal(map[string]string{"content": reply})
+	m.db.SaveMessage(&database.Message{
+		BotID:     inst.DBID,
+		ChannelID: &chID,
+		Direction: "outbound",
+		Sender:    "",
+		Recipient: sender,
+		MsgType:   "text",
+		Payload:   payload,
+	})
 }
 
 // matchFilter checks if a message passes the channel's filter rule.

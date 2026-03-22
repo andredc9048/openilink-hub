@@ -609,7 +609,7 @@ func TestChannelOwnershipIsolation(t *testing.T) {
 
 	env.register("user1", "password123")
 	botObj := env.createBotForUser("Bot1")
-	ch, _ := env.db.CreateChannel(botObj.ID, "Chan1", "c1", nil)
+	ch, _ := env.db.CreateChannel(botObj.ID, "Chan1", "c1", nil, nil)
 
 	env.post("/api/auth/logout", nil)
 	env.register("user2", "password123")
@@ -684,7 +684,7 @@ func TestStats(t *testing.T) {
 
 	env.register("statsuser", "password123")
 	botObj := env.createBotForUser("Bot1")
-	env.db.CreateChannel(botObj.ID, "Ch1", "", nil)
+	env.db.CreateChannel(botObj.ID, "Ch1", "", nil, nil)
 
 	code, stats := env.get("/api/stats")
 	assertCode(t, "stats", code, 200)
@@ -921,7 +921,7 @@ func TestWebSocketInitAndPing(t *testing.T) {
 
 	env.register("wsuser", "password123")
 	botObj := env.createBotForUser("Bot1")
-	ch, _ := env.db.CreateChannel(botObj.ID, "WsChan", "", nil)
+	ch, _ := env.db.CreateChannel(botObj.ID, "WsChan", "", nil, nil)
 
 	ws := env.connectWS(t, ch.APIKey)
 	defer ws.Close()
@@ -979,7 +979,7 @@ func TestWebSocketSendText(t *testing.T) {
 	env.register("wssend", "password123")
 	botObj := env.createBotForUser("Bot1")
 	env.mgr.StartBot(context.Background(), botObj)
-	ch, _ := env.db.CreateChannel(botObj.ID, "SendChan", "", nil)
+	ch, _ := env.db.CreateChannel(botObj.ID, "SendChan", "", nil, nil)
 
 	ws := env.connectWS(t, ch.APIKey)
 	defer ws.Close()
@@ -1019,9 +1019,9 @@ func TestMentionRouting(t *testing.T) {
 	botObj := env.createBotForUser("Bot1")
 	env.mgr.StartBot(context.Background(), botObj)
 
-	ch1, _ := env.db.CreateChannel(botObj.ID, "支持", "support", nil)
-	ch2, _ := env.db.CreateChannel(botObj.ID, "销售", "sales", nil)
-	chAll, _ := env.db.CreateChannel(botObj.ID, "全部", "", nil)
+	ch1, _ := env.db.CreateChannel(botObj.ID, "支持", "support", nil, nil)
+	ch2, _ := env.db.CreateChannel(botObj.ID, "销售", "sales", nil, nil)
+	chAll, _ := env.db.CreateChannel(botObj.ID, "全部", "", nil, nil)
 
 	ws1 := env.connectWS(t, ch1.APIKey)
 	defer ws1.Close()
@@ -1109,7 +1109,7 @@ func TestChannelHTTPStatus(t *testing.T) {
 	env.register("httpuser", "password123")
 	botObj := env.createBotForUser("Bot1")
 	env.mgr.StartBot(context.Background(), botObj)
-	ch, _ := env.db.CreateChannel(botObj.ID, "HttpChan", "", nil)
+	ch, _ := env.db.CreateChannel(botObj.ID, "HttpChan", "", nil, nil)
 
 	resp := httpGet(t, env.srv.URL+"/api/channel/status?key="+ch.APIKey)
 	defer resp.Body.Close()
@@ -1141,7 +1141,7 @@ func TestChannelHTTPStatusWithHeader(t *testing.T) {
 	env.register("headeruser", "password123")
 	botObj := env.createBotForUser("Bot1")
 	env.mgr.StartBot(context.Background(), botObj)
-	ch, _ := env.db.CreateChannel(botObj.ID, "HeaderChan", "", nil)
+	ch, _ := env.db.CreateChannel(botObj.ID, "HeaderChan", "", nil, nil)
 
 	resp := httpGetWithHeader(t, env.srv.URL+"/api/channel/status", "X-API-Key", ch.APIKey)
 	defer resp.Body.Close()
@@ -1154,7 +1154,7 @@ func TestChannelHTTPMessages(t *testing.T) {
 
 	env.register("msghttp", "password123")
 	botObj := env.createBotForUser("Bot1")
-	ch, _ := env.db.CreateChannel(botObj.ID, "MsgChan", "", nil)
+	ch, _ := env.db.CreateChannel(botObj.ID, "MsgChan", "", nil, nil)
 
 	payload, _ := json.Marshal(map[string]string{"content": "hello"})
 	for i := 0; i < 5; i++ {
@@ -1206,7 +1206,7 @@ func TestChannelHTTPSend(t *testing.T) {
 	env.register("sendhttp", "password123")
 	botObj := env.createBotForUser("Bot1")
 	env.mgr.StartBot(context.Background(), botObj)
-	ch, _ := env.db.CreateChannel(botObj.ID, "SendChan", "", nil)
+	ch, _ := env.db.CreateChannel(botObj.ID, "SendChan", "", nil, nil)
 
 	// Send message
 	resp := httpPost(t, env.srv.URL+"/api/channel/send?key="+ch.APIKey,
@@ -1263,9 +1263,9 @@ func TestChannelHTTPDisabledChannel(t *testing.T) {
 
 	env.register("disuser", "password123")
 	botObj := env.createBotForUser("Bot1")
-	ch, _ := env.db.CreateChannel(botObj.ID, "DisChan", "", nil)
+	ch, _ := env.db.CreateChannel(botObj.ID, "DisChan", "", nil, nil)
 
-	env.db.UpdateChannel(ch.ID, ch.Name, ch.Handle, &ch.FilterRule, false)
+	env.db.UpdateChannel(ch.ID, ch.Name, ch.Handle, &ch.FilterRule, &ch.AIConfig, false)
 
 	resp := httpGet(t, env.srv.URL+"/api/channel/status?key="+ch.APIKey)
 	assertCode(t, "disabled channel", resp.StatusCode, 401)
