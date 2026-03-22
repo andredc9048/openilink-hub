@@ -177,7 +177,7 @@ export function BotDetailPage() {
     if (!file) return;
     e.target.value = "";
     setPendingFile(file);
-    if (file.type.startsWith("image/")) {
+    if (file.type.startsWith("image/") || file.type.startsWith("video/")) {
       setPendingPreview(URL.createObjectURL(file));
     } else {
       setPendingPreview(null);
@@ -311,8 +311,10 @@ export function BotDetailPage() {
           )}
           {pendingFile && (
             <div className="px-4 py-2 border-t bg-secondary/50 flex items-center gap-3">
-              {pendingPreview ? (
+              {pendingPreview && pendingFile?.type.startsWith("image/") ? (
                 <img src={pendingPreview} alt="preview" className="h-16 rounded" />
+              ) : pendingPreview && pendingFile?.type.startsWith("video/") ? (
+                <video src={pendingPreview} className="h-16 rounded" />
               ) : (
                 <div className="h-16 w-16 rounded bg-muted flex items-center justify-center text-xs text-muted-foreground">
                   {pendingFile.name.split('.').pop()?.toUpperCase()}
