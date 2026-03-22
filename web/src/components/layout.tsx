@@ -1,6 +1,6 @@
-import { Outlet, useNavigate } from "react-router-dom";
+import { Outlet, useNavigate, Link } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { LogOut } from "lucide-react";
+import { LogOut, Settings } from "lucide-react";
 import { api } from "../lib/api";
 
 export function Layout() {
@@ -24,6 +24,9 @@ export function Layout() {
         <h1 className="font-semibold text-sm">OpenILink Hub</h1>
         <div className="flex items-center gap-3">
           <span className="text-xs text-[var(--muted-foreground)]">{user.username}</span>
+          <Link to="/settings" className="text-[var(--muted-foreground)] hover:text-[var(--foreground)]">
+            <Settings className="w-4 h-4" />
+          </Link>
           <button onClick={handleLogout} className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer">
             <LogOut className="w-4 h-4" />
           </button>

@@ -30,6 +30,11 @@ func (db *DB) CreateOAuthAccount(a *OAuthAccount) error {
 	return err
 }
 
+func (db *DB) DeleteOAuthAccount(provider, providerID string) error {
+	_, err := db.Exec("DELETE FROM oauth_accounts WHERE provider = $1 AND provider_id = $2", provider, providerID)
+	return err
+}
+
 func (db *DB) ListOAuthAccountsByUser(userID string) ([]OAuthAccount, error) {
 	rows, err := db.Query(
 		`SELECT provider, provider_id, user_id, username, avatar_url

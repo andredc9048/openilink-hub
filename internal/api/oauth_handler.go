@@ -62,34 +62,42 @@ func (s *Server) oauthProviders() map[string]*oauthProvider {
 
 // --- OAuth state store (in-memory, short-lived) ---
 
+type oauthStateEntry struct {
+	CreatedAt time.Time
+	BindUID   string // non-empty = bind mode (link to existing user)
+}
+
 type oauthStateStore struct {
 	mu    sync.Mutex
-	store map[string]time.Time
+	store map[string]*oauthStateEntry
 }
 
 func newOAuthStateStore() *oauthStateStore {
-	return &oauthStateStore{store: make(map[string]time.Time)}
+	return &oauthStateStore{store: make(map[string]*oauthStateEntry)}
 }
 
-func (s *oauthStateStore) Generate() string {
+func (s *oauthStateStore) Generate(bindUID string) string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	state := hex.EncodeToString(b)
 	s.mu.Lock()
-	s.store[state] = time.Now()
+	s.store[state] = &oauthStateEntry{CreatedAt: time.Now(), BindUID: bindUID}
 	s.mu.Unlock()
 	return state
 }
 
-func (s *oauthStateStore) Validate(state string) bool {
+func (s *oauthStateStore) Validate(state string) (*oauthStateEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	created, ok := s.store[state]
+	entry, ok := s.store[state]
 	if !ok {
-		return false
+		return nil, false
 	}
 	delete(s.store, state)
-	return time.Since(created) < 10*time.Minute
+	if time.Since(entry.CreatedAt) > 10*time.Minute {
+		return nil, false
+	}
+	return entry, true
 }
 
 // --- Handlers ---
@@ -105,7 +113,7 @@ func (s *Server) handleOAuthProviders(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{"providers": names})
 }
 
-// GET /api/auth/oauth/{provider} — redirect to OAuth provider
+// GET /api/auth/oauth/{provider} — redirect to OAuth provider (login flow)
 func (s *Server) handleOAuthRedirect(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("provider")
 	providers := s.oauthProviders()
@@ -115,7 +123,7 @@ func (s *Server) handleOAuthRedirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state := s.OAuthStates.Generate()
+	state := s.OAuthStates.Generate("")
 
 	params := url.Values{
 		"client_id":     {p.ClientID},
@@ -130,7 +138,7 @@ func (s *Server) handleOAuthRedirect(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, p.AuthURL+"?"+params.Encode(), http.StatusFound)
 }
 
-// GET /api/auth/oauth/{provider}/callback — handle OAuth callback
+// GET /api/auth/oauth/{provider}/callback — handle OAuth callback (login or bind)
 func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("provider")
 	providers := s.oauthProviders()
@@ -142,7 +150,8 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Validate state
 	state := r.URL.Query().Get("state")
-	if !s.OAuthStates.Validate(state) {
+	entry, valid := s.OAuthStates.Validate(state)
+	if !valid {
 		jsonError(w, "invalid oauth state", http.StatusBadRequest)
 		return
 	}
@@ -169,7 +178,34 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find or create user
+	// Bind mode: link OAuth account to existing logged-in user
+	if entry.BindUID != "" {
+		// Check if this OAuth account is already linked to someone else
+		existing, err := s.DB.GetOAuthAccount(name, providerID)
+		if err == nil && existing.UserID != entry.BindUID {
+			http.Redirect(w, r, "/?oauth_error=already_linked", http.StatusFound)
+			return
+		}
+
+		if err == sql.ErrNoRows {
+			if err := s.DB.CreateOAuthAccount(&database.OAuthAccount{
+				Provider:   name,
+				ProviderID: providerID,
+				UserID:     entry.BindUID,
+				Username:   username,
+				AvatarURL:  avatarURL,
+			}); err != nil {
+				slog.Error("oauth bind failed", "provider", name, "err", err)
+				http.Redirect(w, r, "/?oauth_error=bind_failed", http.StatusFound)
+				return
+			}
+		}
+
+		http.Redirect(w, r, "/?oauth_bound="+name, http.StatusFound)
+		return
+	}
+
+	// Login mode: find or create user
 	user, err := s.findOrCreateOAuthUser(name, providerID, username, email, avatarURL)
 	if err != nil {
 		slog.Error("oauth user creation failed", "provider", name, "err", err)
@@ -185,8 +221,93 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	token, _ := auth.CreateSession(s.DB, user.ID)
 	setSessionCookie(w, token)
 
-	// Redirect to frontend
 	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// GET /api/auth/oauth/{provider}/bind — start bind flow (protected)
+func (s *Server) handleOAuthBind(w http.ResponseWriter, r *http.Request) {
+	userID := auth.UserIDFromContext(r.Context())
+	name := r.PathValue("provider")
+	providers := s.oauthProviders()
+	p, ok := providers[name]
+	if !ok {
+		jsonError(w, "unknown provider", http.StatusBadRequest)
+		return
+	}
+
+	state := s.OAuthStates.Generate(userID)
+
+	params := url.Values{
+		"client_id":     {p.ClientID},
+		"redirect_uri":  {s.Config.RPOrigin + "/api/auth/oauth/" + name + "/callback"},
+		"state":         {state},
+		"response_type": {"code"},
+	}
+	if p.Scopes != "" {
+		params.Set("scope", p.Scopes)
+	}
+
+	http.Redirect(w, r, p.AuthURL+"?"+params.Encode(), http.StatusFound)
+}
+
+// GET /api/auth/oauth/accounts — list linked OAuth accounts for current user
+func (s *Server) handleOAuthAccounts(w http.ResponseWriter, r *http.Request) {
+	userID := auth.UserIDFromContext(r.Context())
+	accounts, err := s.DB.ListOAuthAccountsByUser(userID)
+	if err != nil {
+		jsonError(w, "list failed", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(accounts)
+}
+
+// DELETE /api/auth/oauth/accounts/{provider} — unlink an OAuth account
+func (s *Server) handleOAuthUnbind(w http.ResponseWriter, r *http.Request) {
+	userID := auth.UserIDFromContext(r.Context())
+	providerName := r.PathValue("provider")
+
+	accounts, err := s.DB.ListOAuthAccountsByUser(userID)
+	if err != nil {
+		jsonError(w, "query failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Find the account to unlink
+	var target *database.OAuthAccount
+	for _, a := range accounts {
+		if a.Provider == providerName {
+			target = &a
+			break
+		}
+	}
+	if target == nil {
+		jsonError(w, "not linked", http.StatusNotFound)
+		return
+	}
+
+	// Ensure user has another login method (password or other OAuth)
+	user, err := s.DB.GetUserByID(userID)
+	if err != nil {
+		jsonError(w, "user not found", http.StatusInternalServerError)
+		return
+	}
+	otherOAuth := 0
+	for _, a := range accounts {
+		if a.Provider != providerName {
+			otherOAuth++
+		}
+	}
+	if user.PasswordHash == "" && otherOAuth == 0 {
+		jsonError(w, "cannot unlink last login method", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.DB.DeleteOAuthAccount(target.Provider, target.ProviderID); err != nil {
+		jsonError(w, "unlink failed", http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w)
 }
 
 // findOrCreateOAuthUser links an OAuth account to an existing user or creates a new one.
@@ -194,7 +315,6 @@ func (s *Server) findOrCreateOAuthUser(provider, providerID, username, email, av
 	// Check if OAuth account already linked
 	oa, err := s.DB.GetOAuthAccount(provider, providerID)
 	if err == nil {
-		// Already linked — return the user
 		return s.DB.GetUserByID(oa.UserID)
 	}
 	if err != sql.ErrNoRows {
@@ -218,7 +338,6 @@ func (s *Server) findOrCreateOAuthUser(provider, providerID, username, email, av
 		if count == 0 {
 			role = database.RoleAdmin
 		}
-		// Generate a unique username to avoid conflicts
 		uname := provider + "_" + username
 		if _, err := s.DB.GetUserByUsername(uname); err == nil {
 			uname = provider + "_" + username + "_" + providerID
@@ -271,7 +390,6 @@ func exchangeCode(p *oauthProvider, redirectURI, code string) (string, error) {
 		Error       string `json:"error"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
-		// GitHub sometimes returns form-encoded
 		vals, _ := url.ParseQuery(string(body))
 		result.AccessToken = vals.Get("access_token")
 		result.Error = vals.Get("error")
