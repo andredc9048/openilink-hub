@@ -8,6 +8,7 @@ import (
 	"github.com/openilink/openilink-hub/internal/bot"
 	"github.com/openilink/openilink-hub/internal/database"
 	"github.com/openilink/openilink-hub/internal/relay"
+	"github.com/openilink/openilink-hub/internal/web"
 )
 
 type Server struct {
@@ -90,6 +91,11 @@ func (s *Server) Handler() http.Handler {
 	protected.HandleFunc("DELETE /api/users/{id}", s.requireAdmin(s.handleDeleteUser))
 
 	mux.Handle("/api/", auth.Middleware(s.DB)(protected))
+
+	// Serve embedded frontend (production) or skip (dev mode uses vite)
+	if handler := web.Handler(); handler != nil {
+		mux.Handle("/", handler)
+	}
 
 	return cors(mux)
 }

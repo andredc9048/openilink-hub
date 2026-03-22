@@ -1,5 +1,6 @@
 openilink-hub
-dist/
+internal/web/dist/*
+!internal/web/dist/.gitkeep
 *.db
 *.db-wal
 *.db-shm

@@ -4,8 +4,22 @@ services:
     environment:
       POSTGRES_USER: openilink
       POSTGRES_PASSWORD: openilink
-      POSTGRES_DB: openilink_test
+      POSTGRES_DB: openilink
     ports:
       - "15432:5432"
-    tmpfs:
-      - /var/lib/postgresql/data
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  hub:
+    build: .
+    ports:
+      - "9800:9800"
+    environment:
+      DATABASE_URL: postgres://openilink:openilink@postgres:5432/openilink?sslmode=disable
+      RP_ORIGIN: http://localhost:9800
+      RP_ID: localhost
+    depends_on:
+      - postgres
+
+volumes:
+  pgdata:
