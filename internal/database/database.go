@@ -51,15 +51,21 @@ func runMigrations(db *sql.DB) error {
 		return fmt.Errorf("create schema_version: %w", err)
 	}
 
+	// Load migration files
+	sqls, err := loadMigrations()
+	if err != nil {
+		return fmt.Errorf("load migrations: %w", err)
+	}
+
 	// Get current version
 	var current int
 	db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_version").Scan(&current)
 
 	// Run pending migrations
-	for i := current; i < len(migrations); i++ {
+	for i := current; i < len(sqls); i++ {
 		version := i + 1
 		slog.Info("running migration", "version", version)
-		if _, err := db.Exec(migrations[i]); err != nil {
+		if _, err := db.Exec(sqls[i]); err != nil {
 			return fmt.Errorf("migration %d failed: %w", version, err)
 		}
 		if _, err := db.Exec("INSERT INTO schema_version (version) VALUES ($1)", version); err != nil {
@@ -67,8 +73,8 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
-	if current < len(migrations) {
-		slog.Info("migrations complete", "from", current, "to", len(migrations))
+	if current < len(sqls) {
+		slog.Info("migrations complete", "from", current, "to", len(sqls))
 	}
 	return nil
 }
