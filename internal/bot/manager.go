@@ -192,35 +192,39 @@ func (m *Manager) onInbound(inst *Instance, msg provider.InboundMessage) {
 		items[i] = convertRelayItem(item)
 	}
 
-	// Load channels and route — match first channel only
+	// Load channels and route
 	channels, err := m.db.ListChannelsByBot(inst.DBID)
 	if err != nil {
 		slog.Error("load channels failed", "bot", inst.DBID, "err", err)
 		return
 	}
 
-	var target *database.Channel
+	// Match channels:
+	// - No handle → receives ALL messages
+	// - Has handle → only receives messages with @handle mention
+	var matched []database.Channel
 	mentioned := parseMentions(content)
-	if len(mentioned) > 0 {
-		// First @mention match
-		first := strings.ToLower(mentioned[0])
-		for _, ch := range channels {
-			if ch.Handle != "" && strings.ToLower(ch.Handle) == first {
-				target = &ch
-				break
-			}
-		}
-	} else {
-		// First filter match
-		for _, ch := range channels {
+	mentionMatched := make(map[string]bool) // track which @handles already matched
+
+	for _, ch := range channels {
+		if ch.Handle == "" {
+			// No handle — always receives (if filter matches)
 			if matchFilter(ch.FilterRule, msg.Sender, content, msgType) {
-				target = &ch
-				break
+				matched = append(matched, ch)
+			}
+		} else if len(mentioned) > 0 && !mentionMatched[strings.ToLower(ch.Handle)] {
+			// Has handle — check if @mentioned (first match only per handle)
+			for _, m := range mentioned {
+				if strings.EqualFold(m, ch.Handle) {
+					matched = append(matched, ch)
+					mentionMatched[strings.ToLower(ch.Handle)] = true
+					break
+				}
 			}
 		}
 	}
 
-	if target == nil {
+	if len(matched) == 0 {
 		// No channel matched — store without channel_id
 		m.db.SaveMessage(&database.Message{
 			BotID: inst.DBID, Direction: "inbound", Sender: msg.Sender,
@@ -229,27 +233,29 @@ func (m *Manager) onInbound(inst *Instance, msg provider.InboundMessage) {
 		return
 	}
 
-	// Store inbound with channel_id
-	chID := target.ID
-	seqID, _ := m.db.SaveMessage(&database.Message{
-		BotID: inst.DBID, ChannelID: &chID, Direction: "inbound",
-		Sender: msg.Sender, Recipient: msg.Recipient, MsgType: msgType, Payload: payload,
-	})
-	_ = m.db.UpdateChannelLastSeq(target.ID, seqID)
+	// Deliver to each matched channel
+	for _, ch := range matched {
+		chID := ch.ID
+		seqID, _ := m.db.SaveMessage(&database.Message{
+			BotID: inst.DBID, ChannelID: &chID, Direction: "inbound",
+			Sender: msg.Sender, Recipient: msg.Recipient, MsgType: msgType, Payload: payload,
+		})
+		_ = m.db.UpdateChannelLastSeq(ch.ID, seqID)
 
-	env := relay.NewEnvelope("message", relay.MessageData{
-		SeqID: seqID, ExternalID: msg.ExternalID,
-		Sender: msg.Sender, Recipient: msg.Recipient, GroupID: msg.GroupID,
-		Timestamp: msg.Timestamp, MessageState: msg.MessageState,
-		Items: items, ContextToken: msg.ContextToken, SessionID: msg.SessionID,
-	})
+		env := relay.NewEnvelope("message", relay.MessageData{
+			SeqID: seqID, ExternalID: msg.ExternalID,
+			Sender: msg.Sender, Recipient: msg.Recipient, GroupID: msg.GroupID,
+			Timestamp: msg.Timestamp, MessageState: msg.MessageState,
+			Items: items, ContextToken: msg.ContextToken, SessionID: msg.SessionID,
+		})
 
-	d := sink.Delivery{
-		BotDBID: inst.DBID, Provider: inst.Provider, Channel: *target,
-		Message: msg, Envelope: env, SeqID: seqID, MsgType: msgType, Content: content,
-	}
-	for _, s := range m.sinks {
-		go s.Handle(d)
+		d := sink.Delivery{
+			BotDBID: inst.DBID, Provider: inst.Provider, Channel: ch,
+			Message: msg, Envelope: env, SeqID: seqID, MsgType: msgType, Content: content,
+		}
+		for _, s := range m.sinks {
+			go s.Handle(d)
+		}
 	}
 }
 

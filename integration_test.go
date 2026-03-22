@@ -1035,7 +1035,7 @@ func TestMentionRouting(t *testing.T) {
 	inst, _ := env.mgr.GetInstance(botObj.ID)
 	mock := inst.Provider.(*mockProvider.Provider)
 
-	// @support → ch1 only
+	// @support → ch1 (handle match) + chAll (no handle, receives all)
 	mock.SimulateInbound(provider.InboundMessage{
 		ExternalID: "1", Sender: "u@wx", Timestamp: time.Now().UnixMilli(),
 		Items: []provider.MessageItem{{Type: "text", Text: "@support help"}},
@@ -1046,23 +1046,31 @@ func TestMentionRouting(t *testing.T) {
 	if readWSTimeout(t, ws2, 300*time.Millisecond) != nil {
 		t.Error("ch2 should NOT receive @support")
 	}
-	if readWSTimeout(t, wsAll, 300*time.Millisecond) != nil {
-		t.Error("chAll should NOT receive @support")
+	if readWSTimeout(t, wsAll, 2*time.Second) == nil {
+		t.Error("chAll (no handle) should receive ALL messages")
 	}
 
-	// No mention → first matching channel only (ch1 = "支持", matches first)
+	// No mention → only chAll (no handle channels receive all)
+	wsAll.Close()
+	wsAll = env.connectWS(t, chAll.APIKey)
+	defer wsAll.Close()
+	readWS(t, wsAll)
+
 	mock.SimulateInbound(provider.InboundMessage{
 		ExternalID: "2", Sender: "u@wx", Timestamp: time.Now().UnixMilli(),
 		Items: []provider.MessageItem{{Type: "text", Text: "普通消息"}},
 	})
-	if readWSTimeout(t, ws1, 2*time.Second) == nil {
-		t.Error("ch1 should receive non-mention (first match)")
+	if readWSTimeout(t, ws1, 300*time.Millisecond) != nil {
+		t.Error("ch1 (has handle) should NOT receive non-mention")
 	}
 	if readWSTimeout(t, ws2, 300*time.Millisecond) != nil {
-		t.Error("ch2 should NOT receive (only first channel matches)")
+		t.Error("ch2 (has handle) should NOT receive non-mention")
+	}
+	if readWSTimeout(t, wsAll, 2*time.Second) == nil {
+		t.Error("chAll (no handle) should receive non-mention")
 	}
 
-	// @unknown → nobody
+	// @unknown → only chAll (no handle channels still receive)
 	ws1.Close()
 	ws2.Close()
 	wsAll.Close()
@@ -1080,10 +1088,26 @@ func TestMentionRouting(t *testing.T) {
 		ExternalID: "3", Sender: "u@wx", Timestamp: time.Now().UnixMilli(),
 		Items: []provider.MessageItem{{Type: "text", Text: "@nobody test"}},
 	})
-	if readWSTimeout(t, ws1, 300*time.Millisecond) != nil ||
-		readWSTimeout(t, ws2, 300*time.Millisecond) != nil ||
-		readWSTimeout(t, wsAll, 300*time.Millisecond) != nil {
-		t.Error("@nobody should not route anywhere")
+	if readWSTimeout(t, ws1, 300*time.Millisecond) != nil {
+		t.Error("ch1 should NOT receive @nobody")
+	}
+	if readWSTimeout(t, ws2, 300*time.Millisecond) != nil {
+		t.Error("ch2 should NOT receive @nobody")
+	}
+	// chAll should receive because it has no handle (receives all)
+	// Use longer timeout and drain first to avoid stale messages
+	time.Sleep(200 * time.Millisecond)
+	msgs, _ := env.db.ListChannelMessages(chAll.ID, "u@wx", 10)
+	foundNobody := false
+	for _, m := range msgs {
+		var p struct{ Content string }
+		json.Unmarshal(m.Payload, &p)
+		if p.Content == "@nobody test" {
+			foundNobody = true
+		}
+	}
+	if !foundNobody {
+		t.Error("chAll (no handle) should still receive @nobody in DB")
 	}
 }
 
