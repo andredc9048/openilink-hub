@@ -282,10 +282,18 @@ function ChannelRow({ channel, onRefresh }: { channel: any; onRefresh: () => voi
   const [copiedWs, setCopiedWs] = useState(false);
   const [showLive, setShowLive] = useState(false);
   const [showAI, setShowAI] = useState(false);
+  const [editingHandle, setEditingHandle] = useState(false);
+  const [handleVal, setHandleVal] = useState(channel.handle || "");
 
   const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
   const wsUrl = `${wsProto}//${location.host}/api/ws?key=${channel.api_key}`;
   const aiEnabled = channel.ai_config?.enabled;
+
+  async function saveHandle() {
+    await api.updateChannel(channel.id, { handle: handleVal });
+    setEditingHandle(false);
+    onRefresh();
+  }
 
   function copyKey() {
     navigator.clipboard.writeText(channel.api_key);
@@ -304,8 +312,24 @@ function ChannelRow({ channel, onRefresh }: { channel: any; onRefresh: () => voi
         <div className="flex items-center gap-2">
           <Cable className="w-3.5 h-3.5 text-muted-foreground" />
           <span className="text-sm font-medium">{channel.name}</span>
-          {channel.handle && (
-            <span className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded">@{channel.handle}</span>
+          {editingHandle ? (
+            <form onSubmit={(e) => { e.preventDefault(); saveHandle(); }} className="flex items-center gap-1">
+              <Input
+                value={handleVal}
+                onChange={(e) => setHandleVal(e.target.value)}
+                placeholder="handle"
+                className="h-5 text-[10px] w-24 px-1.5 font-mono"
+                autoFocus
+                onBlur={saveHandle}
+              />
+            </form>
+          ) : (
+            <button
+              onClick={() => setEditingHandle(true)}
+              className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded cursor-pointer hover:bg-secondary/80"
+            >
+              {channel.handle ? `@${channel.handle}` : "+ handle"}
+            </button>
           )}
           {aiEnabled && (
             <span className="text-[10px] text-primary bg-primary/10 px-1.5 py-0.5 rounded flex items-center gap-0.5">
