@@ -58,21 +58,19 @@ export function BotsPage() {
         <Card className="flex flex-col items-center gap-4 py-8">
           <QrCanvas url={qrUrl} />
           <p className="text-sm text-muted-foreground">{bindStatus}</p>
-          <Button variant="ghost" size="sm" onClick={() => { setBinding(false); setQrUrl(""); }}>取消</Button>
-        </Card>
-      ) : (
-        <div className="space-y-2">
-          <Button onClick={startBind} className="w-full" variant="outline">
-            <Plus className="w-4 h-4 mr-2" /> 绑定新 Bot
-          </Button>
           {hasGlobalAI && (
-            <label className="flex items-center gap-2 px-1 cursor-pointer">
+            <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" checked={enableAI} onChange={(e) => setEnableAI(e.target.checked)} className="w-3.5 h-3.5 accent-primary" />
               <Bot className="w-3.5 h-3.5 text-muted-foreground" />
               <span className="text-xs text-muted-foreground">自动开启内置 AI 回复</span>
             </label>
           )}
-        </div>
+          <Button variant="ghost" size="sm" onClick={() => { setBinding(false); setQrUrl(""); }}>取消</Button>
+        </Card>
+      ) : (
+        <Button onClick={startBind} className="w-full" variant="outline">
+          <Plus className="w-4 h-4 mr-2" /> 绑定新 Bot
+        </Button>
       )}
 
       {bots.map((bot) => (
