@@ -289,8 +289,8 @@ export function BotDetailPage() {
       }
       setTimeout(loadMessages, 500);
       return null;
-    } catch {
-      return "网络错误";
+    } catch (e: any) {
+      return "网络错误: " + (e?.message || "请求失败");
     } finally {
       setSending(false);
     }
