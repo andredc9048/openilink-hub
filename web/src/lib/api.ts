@@ -103,6 +103,10 @@ export const api = {
     request(`/api/admin/webhook-plugins/${id}/review`, { method: "PUT", body: JSON.stringify({ status, reason: reason || "" }) }),
   deletePlugin: (id: string) => request(`/api/admin/webhook-plugins/${id}`, { method: "DELETE" }),
 
+  // Webhook logs
+  webhookLogs: (botId: string, channelId?: string, limit = 50) =>
+    request<any[]>(`/api/bots/${botId}/webhook-logs?limit=${limit}${channelId ? "&channel_id=" + channelId : ""}`),
+
   // Admin: Dashboard
   adminStats: () => request<any>("/api/admin/stats"),
 

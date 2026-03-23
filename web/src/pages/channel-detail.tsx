@@ -11,7 +11,7 @@ export function ChannelDetailPage() {
   const navigate = useNavigate();
   const [channel, setChannel] = useState<any>(null);
   const [bot, setBot] = useState<any>(null);
-  const [tab, setTab] = useState<"overview" | "connect" | "webhook" | "ai" | "filter" | "live">("overview");
+  const [tab, setTab] = useState<"overview" | "connect" | "webhook" | "ai" | "filter" | "live" | "logs">("overview");
 
   async function load() {
     const bots = await api.listBots();
@@ -42,6 +42,7 @@ export function ChannelDetailPage() {
     { key: "webhook", label: "Webhook" },
     { key: "ai", label: "AI" },
     { key: "filter", label: "过滤" },
+    { key: "logs", label: "Webhook 日志" },
     { key: "live", label: "监控" },
   ] as const;
 
@@ -84,6 +85,7 @@ export function ChannelDetailPage() {
       {tab === "webhook" && <WebhookTab channel={channel} botId={botId!} onRefresh={load} />}
       {tab === "ai" && <AITab channel={channel} botId={botId!} onRefresh={load} />}
       {tab === "filter" && <FilterTab channel={channel} botId={botId!} onRefresh={load} />}
+      {tab === "logs" && <WebhookLogsTab channel={channel} botId={botId!} />}
       {tab === "live" && <LiveTab channel={channel} />}
     </div>
   );
@@ -535,4 +537,101 @@ function LiveTab({ channel }: { channel: any }) {
       </div>
     </div>
   );
+}
+
+// ==================== Webhook Logs ====================
+
+function WebhookLogsTab({ channel, botId }: { channel: any; botId: string }) {
+  const [logs, setLogs] = useState<any[]>([]);
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  async function load() {
+    try { setLogs(await api.webhookLogs(botId, channel.id, 50) || []); } catch {}
+  }
+
+  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, [botId, channel.id]);
+
+  const statusIcons: Record<string, { icon: string; color: string }> = {
+    pending: { icon: "⏳", color: "text-muted-foreground" },
+    requesting: { icon: "→", color: "text-yellow-500" },
+    success: { icon: "✓", color: "text-primary" },
+    failed: { icon: "✕", color: "text-destructive" },
+    skipped: { icon: "⚠", color: "text-yellow-500" },
+    error: { icon: "✕", color: "text-destructive" },
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">{logs.length} 条日志（自动刷新）</p>
+        <button onClick={load} className="text-[10px] text-primary hover:underline cursor-pointer">刷新</button>
+      </div>
+
+      {logs.length === 0 && <p className="text-sm text-muted-foreground text-center py-8">暂无 Webhook 日志</p>}
+
+      <div className="space-y-1">
+        {logs.map((log) => {
+          const s = statusIcons[log.status] || statusIcons.pending;
+          const isOpen = expanded === log.id;
+          return (
+            <div key={log.id} className="rounded-lg border bg-card overflow-hidden">
+              <button onClick={() => setExpanded(isOpen ? null : log.id)}
+                className="w-full flex items-center gap-3 px-3 py-2 text-left cursor-pointer hover:bg-secondary/30">
+                <span className={`text-sm ${s.color}`}>{s.icon}</span>
+                <span className={`text-xs font-mono ${s.color}`}>
+                  {log.status === "success" || log.status === "failed" ? log.response_status : log.status}
+                </span>
+                <span className="text-xs text-muted-foreground truncate flex-1">
+                  {log.request_method} {log.request_url || "—"}
+                </span>
+                {log.duration_ms > 0 && <span className="text-[10px] text-muted-foreground">{log.duration_ms}ms</span>}
+                <span className="text-[10px] text-muted-foreground">{new Date(log.created_at * 1000).toLocaleTimeString()}</span>
+              </button>
+
+              {isOpen && (
+                <div className="border-t px-3 py-2 space-y-2 text-[10px]">
+                  {log.plugin_id && <p className="text-muted-foreground">插件: {log.plugin_id}</p>}
+
+                  {log.request_body && (
+                    <div>
+                      <p className="font-medium mb-0.5">请求</p>
+                      <pre className="font-mono bg-background rounded p-2 overflow-x-auto max-h-32 overflow-y-auto whitespace-pre-wrap">
+                        {tryFormat(log.request_body)}
+                      </pre>
+                    </div>
+                  )}
+
+                  {log.response_body && (
+                    <div>
+                      <p className="font-medium mb-0.5">响应 ({log.response_status})</p>
+                      <pre className="font-mono bg-background rounded p-2 overflow-x-auto max-h-32 overflow-y-auto whitespace-pre-wrap">
+                        {tryFormat(log.response_body)}
+                      </pre>
+                    </div>
+                  )}
+
+                  {log.script_error && (
+                    <p className="text-destructive">错误: {log.script_error}</p>
+                  )}
+
+                  {log.replies && JSON.parse(log.replies || "[]").length > 0 && (
+                    <div>
+                      <p className="font-medium mb-0.5">reply()</p>
+                      {JSON.parse(log.replies).map((r: string, i: number) => (
+                        <p key={i} className="font-mono text-primary">{r}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function tryFormat(s: string): string {
+  try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s; }
 }

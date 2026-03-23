@@ -96,3 +96,31 @@ func encodeMsgCursor(id int64) string {
 func decodeMsgCursor(cursor string) (int64, error) {
 	return decodeCursor(cursor)
 }
+
+func (s *Server) handleWebhookLogs(w http.ResponseWriter, r *http.Request) {
+	userID := auth.UserIDFromContext(r.Context())
+	botID := r.PathValue("id")
+
+	bot, err := s.DB.GetBot(botID)
+	if err != nil || bot.UserID != userID {
+		jsonError(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	channelID := r.URL.Query().Get("channel_id")
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+
+	logs, err := s.DB.ListWebhookLogs(botID, channelID, limit)
+	if err != nil {
+		jsonError(w, "query failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(logs)
+}

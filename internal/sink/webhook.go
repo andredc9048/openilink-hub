@@ -274,6 +274,16 @@ func (s *Webhook) Handle(d Delivery) {
 	if cfg.URL == "" {
 		return
 	}
+	start := time.Now()
+
+	// Step 0: Create log entry
+	var msgID *int64
+	if d.SeqID > 0 {
+		msgID = &d.SeqID
+	}
+	logID, _ := s.DB.CreateWebhookLog(&database.WebhookLog{
+		BotID: d.BotDBID, ChannelID: d.Channel.ID, MessageID: msgID, PluginID: cfg.PluginID,
+	})
 
 	msg := buildPayload(d)
 	body, _ := json.Marshal(msg)
@@ -289,7 +299,7 @@ func (s *Webhook) Handle(d Delivery) {
 	var replies []string
 	skipped := false
 
-	// Resolve script: plugin_id takes precedence over inline script
+	// Resolve script
 	script := cfg.Script
 	if cfg.PluginID != "" {
 		plugin, err := s.DB.GetPlugin(cfg.PluginID)
@@ -302,21 +312,40 @@ func (s *Webhook) Handle(d Delivery) {
 		}
 	}
 
+	// Step 1: Run script (onRequest)
 	if script != "" {
 		var err error
 		req, res, replies, skipped, err = s.runScript(script, msg, req, d.Channel.ID)
 		if err != nil {
 			slog.Error("webhook script error", "channel", d.Channel.ID, "err", err)
+			s.DB.UpdateWebhookLogResult(logID, "error", err.Error(), nil)
 			return
 		}
 		if skipped || req == nil {
+			s.DB.UpdateWebhookLogResult(logID, "skipped", "", replies)
 			return
 		}
 	}
 
-	// Send HTTP request (if script didn't already trigger it via onResponse)
+	// Step 2: Log request details
+	s.DB.UpdateWebhookLogRequest(logID, "requesting", req.URL, req.Method, truncate(req.Body, 4096))
+
+	// Step 3: Send HTTP
 	if res == nil {
 		res = doHTTP(req, d.Channel.ID)
+	}
+
+	duration := int(time.Since(start).Milliseconds())
+
+	// Step 4: Log response
+	if res != nil {
+		status := "success"
+		if res.Status >= 400 {
+			status = "failed"
+		}
+		s.DB.UpdateWebhookLogResponse(logID, status, res.Status, truncate(res.Body, 4096), duration)
+	} else {
+		s.DB.UpdateWebhookLogResponse(logID, "failed", 0, "", duration)
 	}
 
 	// Auto-reply from response {"reply": "..."}
@@ -327,7 +356,19 @@ func (s *Webhook) Handle(d Delivery) {
 		}
 	}
 
+	// Step 5: Log final result with replies
+	if len(replies) > 0 {
+		s.DB.UpdateWebhookLogResult(logID, "success", "", replies)
+	}
+
 	s.sendReplies(d, replies)
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "...(truncated)"
 }
 
 const (

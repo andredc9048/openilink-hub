@@ -107,6 +107,9 @@ func (s *Server) Handler() http.Handler {
 	protected.HandleFunc("POST /api/bots/{id}/reconnect", s.handleReconnect)
 	protected.HandleFunc("DELETE /api/bots/{id}", s.handleDeleteBot)
 
+	// Webhook logs
+	protected.HandleFunc("GET /api/bots/{id}/webhook-logs", s.handleWebhookLogs)
+
 	// Channels (under bots)
 	protected.HandleFunc("GET /api/bots/{id}/channels", s.handleListChannels)
 	protected.HandleFunc("POST /api/bots/{id}/channels", s.handleCreateChannel)
