@@ -328,9 +328,12 @@ func (s *Webhook) Handle(d Delivery) {
 		msgID = &d.SeqID
 	}
 	pluginVersion := ""
-	logID, _ := s.DB.CreateWebhookLog(&database.WebhookLog{
+	logID, logErr := s.DB.CreateWebhookLog(&database.WebhookLog{
 		BotID: d.BotDBID, ChannelID: d.Channel.ID, MessageID: msgID, PluginID: cfg.VersionID, PluginVersion: pluginVersion,
 	})
+	if logErr != nil {
+		slog.Error("create webhook log failed", "channel", d.Channel.ID, "err", logErr)
+	}
 
 	msg := buildPayload(d)
 	body, _ := json.Marshal(msg)
