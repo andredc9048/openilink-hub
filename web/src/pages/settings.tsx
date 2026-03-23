@@ -111,11 +111,192 @@ export function SettingsPage() {
         </Card>
       )}
 
+      <ChangePasswordSection />
+
       {user.role === "admin" && <AdminDashboard />}
+      {user.role === "admin" && <UserManagementSection />}
       {user.role === "admin" && <SystemStatusSection />}
       {user.role === "admin" && <AIConfigSection />}
       {user.role === "admin" && <OAuthConfigSection />}
     </div>
+  );
+}
+
+function ChangePasswordSection() {
+  const [oldPwd, setOldPwd] = useState("");
+  const [newPwd, setNewPwd] = useState("");
+  const [confirmPwd, setConfirmPwd] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(""); setSuccess("");
+    if (newPwd.length < 8) { setError("新密码至少 8 位"); return; }
+    if (newPwd !== confirmPwd) { setError("两次输入不一致"); return; }
+    setSaving(true);
+    try {
+      await api.changePassword({ old_password: oldPwd, new_password: newPwd });
+      setOldPwd(""); setNewPwd(""); setConfirmPwd("");
+      setSuccess("密码已修改");
+    } catch (err: any) { setError(err.message); }
+    setSaving(false);
+  }
+
+  return (
+    <Card className="space-y-3">
+      <h3 className="text-sm font-medium">修改密码</h3>
+      <form onSubmit={handleSubmit} className="space-y-2">
+        <Input type="password" placeholder="当前密码" value={oldPwd} onChange={(e) => setOldPwd(e.target.value)} className="h-8 text-xs" />
+        <Input type="password" placeholder="新密码（至少 8 位）" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} className="h-8 text-xs" />
+        <Input type="password" placeholder="确认新密码" value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)} className="h-8 text-xs" />
+        <div className="flex items-center justify-between">
+          <div>
+            {error && <span className="text-[10px] text-destructive">{error}</span>}
+            {success && <span className="text-[10px] text-primary">{success}</span>}
+          </div>
+          <Button type="submit" size="sm" disabled={saving}>{saving ? "..." : "修改密码"}</Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+function UserManagementSection() {
+  const [users, setUsers] = useState<any[]>([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newUsername, setNewUsername] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newRole, setNewRole] = useState("member");
+  const [error, setError] = useState("");
+  const [resetTarget, setResetTarget] = useState<string | null>(null);
+  const [resetPwd, setResetPwd] = useState("");
+
+  async function load() {
+    try { setUsers(await api.listUsers() || []); } catch {}
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    if (!newUsername.trim() || newPassword.length < 8) { setError("用户名必填，密码至少 8 位"); return; }
+    try {
+      await api.createUser({ username: newUsername.trim(), password: newPassword, role: newRole });
+      setNewUsername(""); setNewPassword(""); setShowCreate(false);
+      load();
+    } catch (err: any) { setError(err.message); }
+  }
+
+  async function handleToggleRole(user: any) {
+    const newRole = user.role === "admin" ? "member" : "admin";
+    if (!confirm(`将 ${user.username} 的角色改为 ${newRole === "admin" ? "管理员" : "成员"}？`)) return;
+    try { await api.updateUserRole(user.id, newRole); load(); } catch (err: any) { setError(err.message); }
+  }
+
+  async function handleToggleStatus(user: any) {
+    const newStatus = user.status === "active" ? "disabled" : "active";
+    if (!confirm(`${newStatus === "disabled" ? "禁用" : "启用"} 用户 ${user.username}？`)) return;
+    try { await api.updateUserStatus(user.id, newStatus); load(); } catch (err: any) { setError(err.message); }
+  }
+
+  async function handleResetPassword() {
+    if (!resetTarget || resetPwd.length < 8) { setError("密码至少 8 位"); return; }
+    try {
+      await api.resetUserPassword(resetTarget, resetPwd);
+      setResetTarget(null); setResetPwd("");
+      setError("");
+    } catch (err: any) { setError(err.message); }
+  }
+
+  async function handleDelete(user: any) {
+    if (!confirm(`永久删除用户 ${user.username}？此操作不可撤销。`)) return;
+    try { await api.deleteUser(user.id); load(); } catch (err: any) { setError(err.message); }
+  }
+
+  return (
+    <Card className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium">用户管理</h3>
+        <Button variant="outline" size="sm" className="text-xs h-7" onClick={() => setShowCreate(!showCreate)}>
+          {showCreate ? "取消" : "创建用户"}
+        </Button>
+      </div>
+
+      {error && <p className="text-[10px] text-destructive">{error}</p>}
+
+      {showCreate && (
+        <form onSubmit={handleCreate} className="p-3 rounded-lg border bg-background space-y-2">
+          <div className="flex gap-2">
+            <Input placeholder="用户名" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} className="h-7 text-xs" />
+            <Input type="password" placeholder="密码（至少 8 位）" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="h-7 text-xs" />
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="flex gap-1">
+              {["member", "admin"].map((r) => (
+                <button key={r} type="button" onClick={() => setNewRole(r)}
+                  className={`px-2 py-0.5 text-[10px] rounded cursor-pointer ${newRole === r ? "bg-primary text-primary-foreground" : "bg-secondary"}`}>
+                  {r === "admin" ? "管理员" : "成员"}
+                </button>
+              ))}
+            </div>
+            <Button type="submit" size="sm" className="h-7 text-xs">创建</Button>
+          </div>
+        </form>
+      )}
+
+      <div className="space-y-1">
+        {users.map((u) => (
+          <div key={u.id} className="flex items-center justify-between p-2 rounded-lg border bg-background">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-full bg-secondary flex items-center justify-center text-[10px] font-medium">
+                {u.username.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium">{u.username}</span>
+                  <span className={`text-[10px] px-1 rounded ${u.role === "admin" ? "bg-primary/10 text-primary" : "bg-secondary text-muted-foreground"}`}>
+                    {u.role === "admin" ? "管理员" : "成员"}
+                  </span>
+                  {u.status === "disabled" && (
+                    <span className="text-[10px] px-1 rounded bg-destructive/10 text-destructive">已禁用</span>
+                  )}
+                </div>
+                {u.email && <p className="text-[10px] text-muted-foreground">{u.email}</p>}
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              <button onClick={() => handleToggleRole(u)} className="text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-secondary cursor-pointer">
+                {u.role === "admin" ? "降级" : "升级"}
+              </button>
+              <button onClick={() => handleToggleStatus(u)} className="text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-secondary cursor-pointer">
+                {u.status === "active" ? "禁用" : "启用"}
+              </button>
+              <button onClick={() => { setResetTarget(u.id); setResetPwd(""); }} className="text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-secondary cursor-pointer">
+                重置密码
+              </button>
+              <button onClick={() => handleDelete(u)} className="text-[10px] text-destructive hover:text-destructive/80 px-1.5 py-0.5 rounded hover:bg-destructive/10 cursor-pointer">
+                删除
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Reset password dialog */}
+      {resetTarget && (
+        <div className="p-3 rounded-lg border bg-background space-y-2">
+          <p className="text-xs font-medium">重置密码 — {users.find((u) => u.id === resetTarget)?.username}</p>
+          <div className="flex gap-2">
+            <Input type="password" placeholder="新密码（至少 8 位）" value={resetPwd} onChange={(e) => setResetPwd(e.target.value)} className="h-7 text-xs" autoFocus />
+            <Button size="sm" className="h-7 text-xs" onClick={handleResetPassword}>确认</Button>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setResetTarget(null)}>取消</Button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 

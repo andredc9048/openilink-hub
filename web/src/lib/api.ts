@@ -91,6 +91,13 @@ export const api = {
 
   // Admin: Users
   listUsers: () => request<any[]>("/api/admin/users"),
-  createUser: (data: any) => request("/api/admin/users", { method: "POST", body: JSON.stringify(data) }),
+  createUser: (data: { username: string; password: string; role?: string }) =>
+    request("/api/admin/users", { method: "POST", body: JSON.stringify(data) }),
+  updateUserRole: (id: string, role: string) =>
+    request(`/api/admin/users/${id}/role`, { method: "PUT", body: JSON.stringify({ role }) }),
+  updateUserStatus: (id: string, status: string) =>
+    request(`/api/admin/users/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) }),
+  resetUserPassword: (id: string, password: string) =>
+    request(`/api/admin/users/${id}/password`, { method: "PUT", body: JSON.stringify({ password }) }),
   deleteUser: (id: string) => request(`/api/admin/users/${id}`, { method: "DELETE" }),
 };
