@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -27,6 +26,10 @@ func (s *Server) handlePasswordRegister(w http.ResponseWriter, r *http.Request) 
 	}
 	if req.Username == "" || req.Password == "" {
 		jsonError(w, "username and password required", http.StatusBadRequest)
+		return
+	}
+	if len(req.Username) < 2 || len(req.Username) > 32 {
+		jsonError(w, "username must be 2-32 characters", http.StatusBadRequest)
 		return
 	}
 	if len(req.Password) < 8 {
@@ -108,15 +111,30 @@ func (s *Server) handleRegisterBegin(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "username required", http.StatusBadRequest)
 		return
 	}
-
-	user, err := s.DB.GetUserByUsername(req.Username)
-	if err == sql.ErrNoRows {
-		displayName := req.DisplayName
-		if displayName == "" {
-			displayName = req.Username
-		}
-		user, err = s.DB.CreateUser(req.Username, displayName)
+	if len(req.Username) < 2 || len(req.Username) > 32 {
+		jsonError(w, "username must be 2-32 characters", http.StatusBadRequest)
+		return
 	}
+
+	// Check if username already taken
+	if _, err := s.DB.GetUserByUsername(req.Username); err == nil {
+		jsonError(w, "username already taken", http.StatusConflict)
+		return
+	}
+
+	displayName := req.DisplayName
+	if displayName == "" {
+		displayName = req.Username
+	}
+
+	// First user becomes admin
+	role := database.RoleMember
+	count, _ := s.DB.UserCount()
+	if count == 0 {
+		role = database.RoleAdmin
+	}
+
+	user, err := s.DB.CreateUserFull(req.Username, "", displayName, "", role)
 	if err != nil {
 		jsonError(w, "create user failed", http.StatusInternalServerError)
 		return
