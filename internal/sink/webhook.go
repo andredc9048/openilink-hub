@@ -47,15 +47,23 @@ type Webhook struct {
 
 func (s *Webhook) Name() string { return "webhook" }
 
+// DebugReply represents a reply action in debug output.
+type DebugReply struct {
+	Type     string `json:"type"`               // "text", "forward", "base64"
+	Text     string `json:"text,omitempty"`     // for text replies
+	Base64   string `json:"base64,omitempty"`   // for base64 (truncated for display)
+	Filename string `json:"filename,omitempty"` // for base64
+}
+
 // DebugResult holds the result of a script debug execution.
 type DebugResult struct {
-	Request  *reqData `json:"request"`            // modified request (nil if skipped)
-	Response *resData `json:"response,omitempty"` // HTTP response
-	Replies  []string `json:"replies"`            // reply() calls
-	Skipped  bool     `json:"skipped"`            // skip() was called
-	Error    string   `json:"error,omitempty"`    // script error
-	Logs     []string `json:"logs"`               // execution trace
-	Perms    DebugPerms `json:"permissions"`      // parsed permissions
+	Request  *reqData     `json:"request"`
+	Response *resData     `json:"response,omitempty"`
+	Replies  []DebugReply `json:"replies"`
+	Skipped  bool         `json:"skipped"`
+	Error    string       `json:"error,omitempty"`
+	Logs     []string     `json:"logs"`
+	Perms    DebugPerms   `json:"permissions"`
 }
 
 type DebugPerms struct {
@@ -64,10 +72,17 @@ type DebugPerms struct {
 	Connect string   `json:"connect"`
 }
 
+func toDebugReplies(replies []string) []DebugReply {
+	var out []DebugReply
+	for _, r := range replies {
+		out = append(out, DebugReply{Type: "text", Text: r})
+	}
+	return out
+}
+
 // DebugRequest executes only the onRequest phase: parse + @match + onRequest.
-// Returns the modified request for the frontend to send.
 func DebugRequest(script string, mockMsg webhookPayload, webhookURL string) *DebugResult {
-	result := &DebugResult{Logs: []string{}, Replies: []string{}}
+	result := &DebugResult{Logs: []string{}, Replies: []DebugReply{}}
 
 	grants, matchTypes, connectDomains := parseScriptPerms(script)
 	result.Perms = DebugPerms{
@@ -101,7 +116,7 @@ func DebugRequest(script string, mockMsg webhookPayload, webhookURL string) *Deb
 		return result
 	}
 	result.Logs = append(result.Logs, "✓ onRequest 执行完成")
-	result.Replies = replies
+	result.Replies = toDebugReplies(replies)
 	result.Skipped = skipped
 
 	if skipped {
@@ -126,7 +141,7 @@ func DebugRequest(script string, mockMsg webhookPayload, webhookURL string) *Deb
 
 // DebugResponse executes only the onResponse phase with the HTTP response from frontend.
 func DebugResponse(script string, mockMsg webhookPayload, response *resData) *DebugResult {
-	result := &DebugResult{Logs: []string{}, Replies: []string{}}
+	result := &DebugResult{Logs: []string{}, Replies: []DebugReply{}}
 
 	vm := goja.New()
 	vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
@@ -169,7 +184,7 @@ func DebugResponse(script string, mockMsg webhookPayload, response *resData) *De
 		}
 	}
 
-	result.Replies = replies
+	result.Replies = toDebugReplies(replies)
 	result.Logs = append(result.Logs, "✓ onResponse 执行完成")
 	if len(replies) > 0 {
 		result.Logs = append(result.Logs, fmt.Sprintf("✓ reply() 调用 %d 次", len(replies)))

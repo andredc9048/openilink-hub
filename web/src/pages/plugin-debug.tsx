@@ -232,8 +232,17 @@ export function PluginDebugPage() {
               {(result.replies || []).length > 0 && (
                 <Card className="p-3">
                   <p className="text-[10px] font-medium mb-1">reply() 输出 ({result.replies.length})</p>
-                  {result.replies.map((r: string, i: number) => (
-                    <p key={i} className="text-[10px] font-mono text-primary">{r}</p>
+                  {result.replies.map((r: any, i: number) => (
+                    <div key={i} className="text-[10px] font-mono">
+                      {r.type === "text" && <p className="text-primary">{r.text}</p>}
+                      {r.type === "forward" && <p className="text-yellow-500">[转发二进制响应]</p>}
+                      {r.type === "base64" && (
+                        <div>
+                          <p className="text-yellow-500">[base64 媒体{r.filename ? `: ${r.filename}` : ""}]</p>
+                          {r.base64 && <p className="text-muted-foreground truncate">{r.base64.slice(0, 60)}...</p>}
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </Card>
               )}
