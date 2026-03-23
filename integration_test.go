@@ -2532,3 +2532,372 @@ function onRequest(ctx) {}`
 		t.Errorf("first config = %v", first)
 	}
 }
+
+// ==================== Additional Webhook Plugin Tests ====================
+
+func TestWebhookPluginSubmitRequiresAuth(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	// No login — try to submit
+	resp := env.postRaw("/api/webhook-plugins/submit", map[string]string{
+		"script": "// @name Test\nfunction onRequest(ctx) {}",
+	})
+	resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Errorf("submit without auth: got %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestWebhookPluginInstallRequiresAuth(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	// Create + approve a plugin as admin
+	env.register("instadmin", "password123")
+	env.db.Exec("UPDATE users SET role = 'admin' WHERE username = 'instadmin'")
+	_, result := env.postCode("/api/webhook-plugins/submit", map[string]string{
+		"script": "// @name InstTest\nfunction onRequest(ctx) {}",
+	})
+	pluginID := result["id"].(string)
+	env.put("/api/admin/webhook-plugins/"+pluginID+"/review", map[string]string{"status": "approved"})
+	env.post("/api/auth/logout", nil)
+
+	// No login — try to install
+	resp := env.postRaw("/api/webhook-plugins/"+pluginID+"/install", nil)
+	resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Errorf("install without auth: got %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestWebhookPluginPublicListAndDetail(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	// Create + approve as admin
+	env.register("pubadmin", "password123")
+	env.db.Exec("UPDATE users SET role = 'admin' WHERE username = 'pubadmin'")
+	_, result := env.postCode("/api/webhook-plugins/submit", map[string]string{
+		"script": "// @name Public Plugin\n// @description Visible to all\n// @author pub\n// @version 1.0.0\nfunction onRequest(ctx) {}",
+	})
+	pluginID := result["id"].(string)
+	env.put("/api/admin/webhook-plugins/"+pluginID+"/review", map[string]string{"status": "approved"})
+
+	// Logout — browse as anonymous
+	env.post("/api/auth/logout", nil)
+	// Use a new client with no session
+	anonClient := env.newClient()
+
+	// List approved (public)
+	resp, _ := anonClient.Get(env.srv.URL + "/api/webhook-plugins")
+	defer resp.Body.Close()
+	assertCode(t, "public list", resp.StatusCode, 200)
+	var plugins []any
+	json.NewDecoder(resp.Body).Decode(&plugins)
+	if len(plugins) != 1 {
+		t.Fatalf("public list: want 1, got %d", len(plugins))
+	}
+	p := plugins[0].(map[string]any)
+	if p["name"] != "Public Plugin" {
+		t.Errorf("name = %v", p["name"])
+	}
+	// Script should be hidden from public
+	if p["script"] != nil && p["script"] != "" {
+		t.Error("script should be hidden in public list")
+	}
+
+	// Detail (public)
+	resp2, _ := anonClient.Get(env.srv.URL + "/api/webhook-plugins/" + pluginID)
+	defer resp2.Body.Close()
+	assertCode(t, "public detail", resp2.StatusCode, 200)
+	var detail map[string]any
+	json.NewDecoder(resp2.Body).Decode(&detail)
+	if detail["name"] != "Public Plugin" {
+		t.Errorf("detail name = %v", detail["name"])
+	}
+	// Script hidden from non-owner/non-admin
+	if detail["script"] != nil && detail["script"] != "" {
+		t.Error("script should be hidden from anonymous")
+	}
+
+	// Anonymous requesting pending falls back to approved (server ignores non-admin status filter)
+	// So we verify the result only contains approved plugins, not pending ones
+	resp3, _ := anonClient.Get(env.srv.URL + "/api/webhook-plugins?status=pending")
+	defer resp3.Body.Close()
+	var fallbackPlugins []any
+	json.NewDecoder(resp3.Body).Decode(&fallbackPlugins)
+	for _, fp := range fallbackPlugins {
+		pm := fp.(map[string]any)
+		if pm["status"] != "approved" {
+			t.Errorf("anonymous got non-approved plugin: status=%v", pm["status"])
+		}
+	}
+}
+
+func TestWebhookPluginSubmitNoName(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("noname", "password123")
+	code, result := env.postCode("/api/webhook-plugins/submit", map[string]string{
+		"script": "function onRequest(ctx) {}",
+	})
+	if code != 400 {
+		t.Errorf("submit no @name: got %d, want 400", code)
+	}
+	if result["error"] == nil || !strings.Contains(result["error"].(string), "@name") {
+		t.Errorf("error = %v, want mention @name", result["error"])
+	}
+}
+
+func TestWebhookPluginSubmitEmptyBody(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("emptyuser", "password123")
+	code, _ := env.postCode("/api/webhook-plugins/submit", map[string]string{})
+	if code != 400 {
+		t.Errorf("submit empty: got %d, want 400", code)
+	}
+}
+
+func TestWebhookPluginDeleteByAdmin(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("deladmin", "password123")
+	env.db.Exec("UPDATE users SET role = 'admin' WHERE username = 'deladmin'")
+
+	_, result := env.postCode("/api/webhook-plugins/submit", map[string]string{
+		"script": "// @name DeleteMe\nfunction onRequest(ctx) {}",
+	})
+	pluginID := result["id"].(string)
+
+	// Delete
+	code, _ := env.del("/api/admin/webhook-plugins/" + pluginID)
+	assertCode(t, "delete", code, 200)
+
+	// Verify gone
+	code, _ = env.get("/api/webhook-plugins/" + pluginID)
+	if code != 404 {
+		t.Errorf("after delete: got %d, want 404", code)
+	}
+}
+
+func TestWebhookPluginDeleteRequiresAdmin(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("deladmin2", "password123")
+	env.post("/api/auth/logout", nil)
+	env.register("normaldel", "password123")
+
+	_, result := env.postCode("/api/webhook-plugins/submit", map[string]string{
+		"script": "// @name CantDelete\nfunction onRequest(ctx) {}",
+	})
+	pluginID := result["id"].(string)
+
+	code, _ := env.del("/api/admin/webhook-plugins/" + pluginID)
+	if code != 403 {
+		t.Errorf("non-admin delete: got %d, want 403", code)
+	}
+}
+
+func TestWebhookPluginInstallCountTracksUsers(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	// Admin creates and approves
+	env.register("countadmin", "password123")
+	env.db.Exec("UPDATE users SET role = 'admin' WHERE username = 'countadmin'")
+	_, result := env.postCode("/api/webhook-plugins/submit", map[string]string{
+		"script": "// @name CountPlugin\nfunction onRequest(ctx) {}",
+	})
+	pluginID := result["id"].(string)
+	env.put("/api/admin/webhook-plugins/"+pluginID+"/review", map[string]string{"status": "approved"})
+
+	// Admin installs
+	env.postCode("/api/webhook-plugins/"+pluginID+"/install", nil)
+	_, detail := env.get("/api/webhook-plugins/" + pluginID)
+	if detail["install_count"] != float64(1) {
+		t.Errorf("after 1st install: count = %v", detail["install_count"])
+	}
+
+	// Same user installs again — should not double count
+	env.postCode("/api/webhook-plugins/"+pluginID+"/install", nil)
+	_, detail = env.get("/api/webhook-plugins/" + pluginID)
+	if detail["install_count"] != float64(1) {
+		t.Errorf("after 2nd install same user: count = %v, want 1", detail["install_count"])
+	}
+
+	// Different user installs
+	env.post("/api/auth/logout", nil)
+	env.register("countuser2", "password123")
+	env.postCode("/api/webhook-plugins/"+pluginID+"/install", nil)
+	_, detail = env.get("/api/webhook-plugins/" + pluginID)
+	if detail["install_count"] != float64(2) {
+		t.Errorf("after different user install: count = %v, want 2", detail["install_count"])
+	}
+}
+
+func TestWebhookPluginOwnerCanSeeOwnPending(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	// Create admin first (so second user is member)
+	env.register("owneradmin", "password123")
+	env.post("/api/auth/logout", nil)
+
+	env.register("plugowner", "password123")
+	_, result := env.postCode("/api/webhook-plugins/submit", map[string]string{
+		"script": "// @name OwnerPlugin\n// @author me\nfunction onRequest(ctx) {}",
+	})
+	pluginID := result["id"].(string)
+
+	// Owner can see their own pending plugin detail
+	code, detail := env.get("/api/webhook-plugins/" + pluginID)
+	assertCode(t, "owner sees own pending", code, 200)
+	if detail["name"] != "OwnerPlugin" {
+		t.Errorf("name = %v", detail["name"])
+	}
+	// Owner sees script
+	if detail["script"] == nil || detail["script"] == "" {
+		t.Error("owner should see own script")
+	}
+}
+
+func TestWebhookPluginReviewInvalidStatus(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("reviewadmin", "password123")
+	env.db.Exec("UPDATE users SET role = 'admin' WHERE username = 'reviewadmin'")
+	_, result := env.postCode("/api/webhook-plugins/submit", map[string]string{
+		"script": "// @name ReviewTest\nfunction onRequest(ctx) {}",
+	})
+	pluginID := result["id"].(string)
+
+	// Invalid status
+	code, errResult := env.put("/api/admin/webhook-plugins/"+pluginID+"/review", map[string]string{
+		"status": "maybe",
+	})
+	if code != 400 {
+		t.Errorf("invalid status: got %d, want 400", code)
+	}
+	if errResult["error"] == nil {
+		t.Error("expected error message")
+	}
+}
+
+func TestWebhookPluginScriptExecutionWithSkip(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("skipadmin", "password123")
+	env.db.Exec("UPDATE users SET role = 'admin' WHERE username = 'skipadmin'")
+
+	// Plugin that skips certain messages
+	skipScript := `// @name SkipFilter
+// @description Skips messages from bot users
+// @author test
+// @version 1.0.0
+
+function onRequest(ctx) {
+	if (ctx.msg.sender.indexOf("bot") >= 0) {
+		skip();
+		return;
+	}
+	ctx.req.body = JSON.stringify({text: ctx.msg.content});
+}`
+
+	_, result := env.postCode("/api/webhook-plugins/submit", map[string]string{"script": skipScript})
+	pluginID := result["id"].(string)
+	env.put("/api/admin/webhook-plugins/"+pluginID+"/review", map[string]string{"status": "approved"})
+	_, installResult := env.postCode("/api/webhook-plugins/"+pluginID+"/install", nil)
+	installedScript := installResult["script"].(string)
+
+	// Set up webhook receiver
+	var received []map[string]any
+	hookSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		received = append(received, body)
+		w.WriteHeader(200)
+	}))
+	defer hookSrv.Close()
+
+	botObj := env.createBotForUser("SkipBot")
+	env.mgr.StartBot(context.Background(), botObj)
+	ch, _ := env.db.CreateChannel(botObj.ID, "SkipChan", "", nil, nil)
+	env.db.UpdateChannel(ch.ID, ch.Name, ch.Handle, &ch.FilterRule, &ch.AIConfig,
+		&database.WebhookConfig{URL: hookSrv.URL, Script: installedScript}, true)
+
+	inst, _ := env.mgr.GetInstance(botObj.ID)
+	mock := inst.Provider.(*mockProvider.Provider)
+
+	// Message from bot user → should be skipped
+	mock.SimulateInbound(provider.InboundMessage{
+		ExternalID: "skip-1", Sender: "bot_assistant@wx", Timestamp: time.Now().UnixMilli(),
+		Items: []provider.MessageItem{{Type: "text", Text: "automated msg"}},
+	})
+	time.Sleep(300 * time.Millisecond)
+	if len(received) != 0 {
+		t.Errorf("bot message should be skipped, got %d deliveries", len(received))
+	}
+
+	// Message from real user → should be delivered
+	mock.SimulateInbound(provider.InboundMessage{
+		ExternalID: "skip-2", Sender: "alice@wx", Timestamp: time.Now().UnixMilli(),
+		Items: []provider.MessageItem{{Type: "text", Text: "real message"}},
+	})
+	time.Sleep(300 * time.Millisecond)
+	if len(received) != 1 {
+		t.Fatalf("real user message: want 1, got %d", len(received))
+	}
+	if received[0]["text"] != "real message" {
+		t.Errorf("body = %v", received[0])
+	}
+}
+
+func TestWebhookPluginListSortedByInstallCount(t *testing.T) {
+	env := setup(t)
+	defer env.close()
+
+	env.register("sortadmin", "password123")
+	env.db.Exec("UPDATE users SET role = 'admin' WHERE username = 'sortadmin'")
+
+	// Create two plugins
+	_, r1 := env.postCode("/api/webhook-plugins/submit", map[string]string{
+		"script": "// @name PluginA\nfunction onRequest(ctx) {}",
+	})
+	_, r2 := env.postCode("/api/webhook-plugins/submit", map[string]string{
+		"script": "// @name PluginB\nfunction onRequest(ctx) {}",
+	})
+	idA := r1["id"].(string)
+	idB := r2["id"].(string)
+	env.put("/api/admin/webhook-plugins/"+idA+"/review", map[string]string{"status": "approved"})
+	env.put("/api/admin/webhook-plugins/"+idB+"/review", map[string]string{"status": "approved"})
+
+	// Install B twice (two users), A once
+	env.postCode("/api/webhook-plugins/"+idB+"/install", nil)
+	env.post("/api/auth/logout", nil)
+	env.register("sortuser2", "password123")
+	env.postCode("/api/webhook-plugins/"+idB+"/install", nil)
+	env.postCode("/api/webhook-plugins/"+idA+"/install", nil)
+
+	// List should have B first (2 installs) then A (1 install)
+	code, list := env.getList("/api/webhook-plugins")
+	assertCode(t, "sorted list", code, 200)
+	if len(list) != 2 {
+		t.Fatalf("list: want 2, got %d", len(list))
+	}
+	first := list[0].(map[string]any)
+	second := list[1].(map[string]any)
+	if first["name"] != "PluginB" {
+		t.Errorf("first should be PluginB (2 installs), got %v", first["name"])
+	}
+	if second["name"] != "PluginA" {
+		t.Errorf("second should be PluginA (1 install), got %v", second["name"])
+	}
+}
