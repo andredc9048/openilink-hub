@@ -208,14 +208,19 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Bind mode: link OAuth account to existing logged-in user
 	if entry.BindUID != "" {
-		// Check if this OAuth account is already linked to someone else
 		existing, err := s.DB.GetOAuthAccount(name, providerID)
 		if err == nil && existing.UserID != entry.BindUID {
-			http.Redirect(w, r, "/?oauth_error=already_linked", http.StatusFound)
-			return
+			// Check if the linked user still exists — clean up stale records
+			if _, userErr := s.DB.GetUserByID(existing.UserID); userErr != nil {
+				slog.Info("oauth cleanup stale binding", "provider", name, "old_user", existing.UserID)
+				s.DB.DeleteOAuthAccount(name, providerID)
+			} else {
+				http.Redirect(w, r, "/dashboard/settings?oauth_error=already_linked", http.StatusFound)
+				return
+			}
 		}
 
-		if err == sql.ErrNoRows {
+		if err == sql.ErrNoRows || (err == nil && existing.UserID != entry.BindUID) {
 			if err := s.DB.CreateOAuthAccount(&database.OAuthAccount{
 				Provider:   name,
 				ProviderID: providerID,
@@ -224,12 +229,12 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 				AvatarURL:  avatarURL,
 			}); err != nil {
 				slog.Error("oauth bind failed", "provider", name, "err", err)
-				http.Redirect(w, r, "/?oauth_error=bind_failed", http.StatusFound)
+				http.Redirect(w, r, "/dashboard/settings?oauth_error=bind_failed", http.StatusFound)
 				return
 			}
 		}
 
-		http.Redirect(w, r, "/?oauth_bound="+name, http.StatusFound)
+		http.Redirect(w, r, "/dashboard/settings?oauth_bound="+name, http.StatusFound)
 		return
 	}
 
@@ -249,7 +254,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	token, _ := auth.CreateSession(s.DB, user.ID)
 	setSessionCookie(w, token)
 
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, "/dashboard", http.StatusFound)
 }
 
 // GET /api/auth/oauth/{provider}/bind — start bind flow (protected)

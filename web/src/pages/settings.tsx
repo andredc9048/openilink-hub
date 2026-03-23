@@ -18,10 +18,23 @@ export function SettingsPage() {
     setUser(u); setOauthAccounts(accounts || []); setOauthProviders(providers.providers || []);
   }
 
+  const [oauthMsg, setOauthMsg] = useState("");
+
   useEffect(() => { load(); }, []);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("oauth_bound") || params.get("oauth_error")) {
+    const bound = params.get("oauth_bound");
+    const error = params.get("oauth_error");
+    if (bound) {
+      setOauthMsg(`${providerLabels[bound] || bound} 绑定成功`);
+    } else if (error === "already_linked") {
+      setOauthMsg("绑定失败：该第三方账号已被其他用户绑定，请联系管理员处理");
+    } else if (error === "bind_failed") {
+      setOauthMsg("绑定失败，请重试");
+    } else if (error) {
+      setOauthMsg("OAuth 错误：" + error);
+    }
+    if (bound || error) {
       window.history.replaceState({}, "", "/dashboard/settings");
       load();
     }
@@ -35,6 +48,13 @@ export function SettingsPage() {
         <h1 className="text-lg font-semibold">账号设置</h1>
         <p className="text-xs text-muted-foreground mt-0.5">个人信息、密码、Passkey、第三方绑定</p>
       </div>
+
+      {oauthMsg && (
+        <div className={`text-xs p-3 rounded-lg border ${oauthMsg.includes("失败") || oauthMsg.includes("错误") ? "border-destructive/30 bg-destructive/5 text-destructive" : "border-primary/30 bg-primary/5 text-primary"}`}>
+          {oauthMsg}
+          <button onClick={() => setOauthMsg("")} className="ml-2 underline cursor-pointer">关闭</button>
+        </div>
+      )}
 
       {/* Account info */}
       <Card className="space-y-3">
