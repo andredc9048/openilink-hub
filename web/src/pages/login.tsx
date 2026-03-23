@@ -3,6 +3,7 @@ import { KeyRound } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { Button } from "../components/ui/button";
+import { HexagonBackground } from "../components/ui/hexagon-background";
 import {
   Card,
   CardContent,
@@ -240,19 +241,36 @@ export function LoginPage() {
     typeof window !== "undefined" && "PublicKeyCredential" in window;
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col gap-6">
-          <Card>
-            <CardHeader className="text-center">
-              <CardTitle className="text-xl">OpenILink Hub</CardTitle>
+    <div className="relative isolate flex min-h-screen items-center justify-center overflow-x-hidden bg-background px-6 py-12 sm:px-8 sm:py-16">
+      <HexagonBackground className="opacity-55" hexagonSize={78} hexagonMargin={5} />
+      <div className="absolute inset-x-0 top-0 h-[28rem] bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.14),transparent_42%)]" />
+
+      <div className="relative z-10 w-full max-w-md">
+        <div className="flex flex-col gap-10">
+          <div className="space-y-4 text-center">
+            <p className="text-sm font-medium tracking-[0.18em] text-muted-foreground uppercase">OpenILink Hub</p>
+            <div className="space-y-3">
+              <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+                {mode === "login" ? "欢迎回来" : "创建你的账号"}
+              </h1>
+              <p className="text-base leading-7 text-muted-foreground">
+                {mode === "login"
+                  ? "登录后即可管理 Bot、渠道和 Webhook 插件。"
+                  : "注册后就可以开始配置微信 Bot 和消息路由。"}
+              </p>
+            </div>
+          </div>
+
+          <Card className="rounded-[1.75rem] border-white/8 bg-card/82 backdrop-blur-sm">
+            <CardHeader className="px-6 pt-8 pb-4 text-center sm:px-8">
+              <CardTitle className="text-2xl">OpenILink Hub</CardTitle>
               <CardDescription>
                 {mode === "login" ? "登录你的账号" : "创建新账号"}
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-6 pb-8 sm:px-8">
               <form onSubmit={handleSubmit}>
-                <FieldGroup>
+                <FieldGroup className="gap-6">
                   {oauthProviders.length > 0 && (
                     <>
                       <Field>
@@ -261,7 +279,7 @@ export function LoginPage() {
                             key={provider}
                             type="button"
                             variant="outline"
-                            className="w-full"
+                            className="h-10 w-full text-sm"
                             onClick={() => handleOAuth(provider)}
                             disabled={loading}
                           >
@@ -280,6 +298,7 @@ export function LoginPage() {
                     <Input
                       id="username"
                       placeholder="请输入用户名"
+                      className="h-10 text-base"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       autoFocus
@@ -301,6 +320,7 @@ export function LoginPage() {
                       id="password"
                       type="password"
                       placeholder={mode === "login" ? "请输入密码" : "设置登录密码"}
+                      className="h-10 text-base"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       disabled={loading}
@@ -319,7 +339,7 @@ export function LoginPage() {
                         <Button
                           type="button"
                           variant="outline"
-                          className="w-full"
+                          className="h-10 w-full text-sm"
                           onClick={
                             mode === "login"
                               ? handlePasskeyLogin
@@ -345,8 +365,8 @@ export function LoginPage() {
                     <Button type="submit" className="w-full" disabled={loading}>
                       {loading ? "..." : mode === "login" ? "登录" : "注册"}
                     </Button>
-                    <FieldDescription className="text-center">
-                      {mode === "login" ? "没有账号？" : "已有账号？"}{" "}
+                      <FieldDescription className="text-center">
+                        {mode === "login" ? "没有账号？" : "已有账号？"}{" "}
                       <button
                         type="button"
                         className="font-medium text-foreground underline underline-offset-4"
@@ -355,13 +375,13 @@ export function LoginPage() {
                         {mode === "login" ? "注册" : "登录"}
                       </button>
                     </FieldDescription>
-                  </Field>
+                    </Field>
                 </FieldGroup>
               </form>
             </CardContent>
           </Card>
 
-          <FieldDescription className="px-6 text-center">
+          <FieldDescription className="px-6 pt-1 text-center text-sm leading-6">
             支持密码、Passkey 和 OAuth 登录方式。
           </FieldDescription>
         </div>
