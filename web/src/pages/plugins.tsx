@@ -288,13 +288,18 @@ function PluginCard({ plugin, onRefresh, isAdmin, isLoggedIn, mode }: {
           <p className="text-[10px] font-medium">发版历史</p>
           {versions.map((v) => (
             <div key={v.id} className="flex items-center gap-2 text-[10px] p-1.5 rounded border bg-background">
-              <span className={`font-mono font-medium ${v.id === plugin.id ? "text-primary" : ""}`}>v{v.version}</span>
-              <Badge variant={v.status === "approved" ? "default" : v.status === "rejected" ? "destructive" : "outline"} className="text-[10px]">
-                {v.status === "approved" ? "✓" : v.status === "rejected" ? "✕" : "⏳"}
+              <span className="font-mono font-medium">v{v.version}</span>
+              <Badge variant={v.status === "approved" ? "default" : v.status === "rejected" || v.status === "cancelled" ? "destructive" : "outline"} className="text-[10px]">
+                {v.status === "approved" ? "✓" : v.status === "rejected" ? "✕" : v.status === "superseded" ? "⊘" : v.status === "cancelled" ? "✕" : "⏳"}
               </Badge>
+              <span className="text-muted-foreground">{v.status}</span>
               {v.changelog && <span className="text-muted-foreground flex-1 truncate">{v.changelog}</span>}
               {v.commit_hash && <span className="font-mono text-muted-foreground">{v.commit_hash.slice(0, 7)}</span>}
               <span className="text-muted-foreground">{new Date(v.created_at * 1000).toLocaleDateString()}</span>
+              {v.status === "pending" && isLoggedIn && (
+                <button onClick={async (e) => { e.stopPropagation(); await api.cancelVersion(plugin.id, v.id); toggleVersions(); toggleVersions(); }}
+                  className="text-destructive hover:underline cursor-pointer ml-auto">取消</button>
+              )}
             </div>
           ))}
           {versions.length === 0 && <p className="text-[10px] text-muted-foreground">暂无历史版本</p>}

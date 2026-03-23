@@ -118,6 +118,35 @@ func (s *Server) handleSubmitPlugin(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{"plugin_id": plugin.ID, "version_id": ver.ID, "status": "pending"})
 }
 
+// POST /api/webhook-plugins/{id}/versions/{vid}/cancel
+func (s *Server) handleCancelVersion(w http.ResponseWriter, r *http.Request) {
+	pluginID := r.PathValue("id")
+	versionID := r.PathValue("vid")
+	userID := auth.UserIDFromContext(r.Context())
+
+	plugin, err := s.DB.GetPlugin(pluginID)
+	if err != nil || plugin.OwnerID != userID {
+		jsonError(w, "not found or not owner", http.StatusNotFound)
+		return
+	}
+
+	ver, err := s.DB.GetPluginVersion(versionID)
+	if err != nil || ver.PluginID != pluginID {
+		jsonError(w, "version not found", http.StatusNotFound)
+		return
+	}
+	if ver.Status != "pending" {
+		jsonError(w, "only pending versions can be cancelled", http.StatusBadRequest)
+		return
+	}
+
+	if _, err := s.DB.Exec("UPDATE plugin_versions SET status = 'cancelled' WHERE id = $1", versionID); err != nil {
+		jsonError(w, "cancel failed", http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w)
+}
+
 // GET /api/webhook-plugins — list plugins with latest approved version
 func (s *Server) handleListPlugins(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
