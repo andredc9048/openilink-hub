@@ -1,6 +1,6 @@
 import { Outlet, useNavigate, Link, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { LogOut, Github, Puzzle, Bot, LayoutDashboard, User, Shield } from "lucide-react";
+import { LogOut, Github, Puzzle, Bot, LayoutDashboard, User, Shield, Bug } from "lucide-react";
 import { api } from "../lib/api";
 
 type NavItem = { path: string; icon: any; label: string; adminOnly?: boolean };
@@ -8,6 +8,7 @@ type NavItem = { path: string; icon: any; label: string; adminOnly?: boolean };
 const navItems: NavItem[] = [
   { path: "/dashboard", icon: Bot, label: "Bot 管理" },
   { path: "/dashboard/webhook-plugins", icon: Puzzle, label: "Webhook 插件" },
+  { path: "/dashboard/webhook-plugins/debug", icon: Bug, label: "插件调试" },
 ];
 
 const bottomItems: NavItem[] = [
@@ -33,6 +34,7 @@ export function Layout() {
 
   function isActive(path: string) {
     if (path === "/dashboard") return location.pathname === "/dashboard" || location.pathname.startsWith("/dashboard/bot/");
+    if (path === "/dashboard/webhook-plugins") return location.pathname === "/dashboard/webhook-plugins";
     return location.pathname.startsWith(path);
   }
 
