@@ -196,12 +196,6 @@ function BotCard({
       tabIndex={0}
       aria-label={`查看 Bot：${bot.name}`}
       onClick={() => navigate(`/dashboard/bot/${bot.id}`)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          navigate(`/dashboard/bot/${bot.id}`);
-        }
-      }}
     >
       <CardHeader>
         <CardTitle>{bot.name}</CardTitle>
