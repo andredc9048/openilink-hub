@@ -127,7 +127,7 @@ All events share this envelope format:
 ```json
 {
   "v": 1,
-  "type": "event_callback",
+  "type": "event",
   "trace_id": "tr_abc123",
   "installation_id": "inst_xxx",
   "bot": {
@@ -149,7 +149,7 @@ When a WeChat message matches your App's subscription:
 ```json
 {
   "v": 1,
-  "type": "event_callback",
+  "type": "event",
   "trace_id": "tr_abc123",
   "installation_id": "inst_xxx",
   "bot": {"id": "bot_xxx"},
@@ -188,7 +188,7 @@ When a user sends `/command args` or the AI Agent calls a tool, the platform rou
 ```json
 {
   "v": 1,
-  "type": "command",
+  "type": "event",
   "trace_id": "tr_abc123",
   "installation_id": "inst_xxx",
   "bot": {"id": "bot_xxx"},
@@ -211,7 +211,7 @@ When a user sends `/command args` or the AI Agent calls a tool, the platform rou
 ```json
 {
   "v": 1,
-  "type": "command",
+  "type": "event",
   "trace_id": "tr_abc123",
   "installation_id": "inst_xxx",
   "bot": {"id": "bot_xxx"},

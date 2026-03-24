@@ -122,15 +122,9 @@ func (d *Dispatcher) DeliverEvent(inst *database.AppInstallation, event *Event) 
 
 	traceID := "tr_" + uuid.New().String()
 
-	// Determine envelope type.
-	envelopeType := "event_callback"
-	if isCommandEvent(event.Type) {
-		envelopeType = "command"
-	}
-
 	envelope := eventEnvelope{
 		V:              envelopeVersion,
-		Type:           envelopeType,
+		Type:           "event",
 		TraceID:        traceID,
 		InstallationID: inst.ID,
 		Bot:            envelopBot{ID: inst.BotID},
@@ -241,11 +235,6 @@ func (d *Dispatcher) markFailed(logID int64, errMsg string, retryCount, duration
 	if err := d.logDB().UpdateEventLogFailed(logID, errMsg, retryCount, durationMs); err != nil {
 		slog.Error("failed to update event log as failed", "logID", logID, "err", err)
 	}
-}
-
-// isCommandEvent returns true if the event type represents a command invocation.
-func isCommandEvent(eventType string) bool {
-	return eventType == "command"
 }
 
 // NewEvent creates an Event with a generated ID and current timestamp.
