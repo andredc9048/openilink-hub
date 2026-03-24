@@ -228,7 +228,23 @@ func (m *Manager) sendAppMedia(ctx context.Context, inst *Instance, to, contextT
 
 	fileName := result.ReplyName
 	if fileName == "" {
-		fileName = "file"
+		// Auto-generate filename with correct extension based on type
+		switch result.ReplyType {
+		case "image":
+			fileName = "image.png"
+			// Detect actual format from data header
+			if len(data) > 3 && data[0] == 0xFF && data[1] == 0xD8 {
+				fileName = "image.jpg"
+			} else if len(data) > 4 && string(data[:4]) == "GIF8" {
+				fileName = "image.gif"
+			} else if len(data) > 8 && string(data[1:4]) == "PNG" {
+				fileName = "image.png"
+			}
+		case "video":
+			fileName = "video.mp4"
+		default:
+			fileName = "file"
+		}
 	}
 
 	clientID, err := inst.Provider.Send(ctx, provider.OutboundMessage{

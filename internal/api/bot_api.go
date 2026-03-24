@@ -134,7 +134,7 @@ func (s *Server) handleBotAPISend(w http.ResponseWriter, r *http.Request) {
 			outMsg.Data = mediaData
 			outMsg.FileName = req.FileName
 			if outMsg.FileName == "" {
-				outMsg.FileName = "file"
+				outMsg.FileName = defaultFileName(req.Type, mediaData)
 			}
 		}
 	}
@@ -247,6 +247,23 @@ func (s *Server) handleBotAPIBotInfo(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleBotAPINotFound(w http.ResponseWriter, r *http.Request) {
 	_ = time.Now() // ensure time import used
 	botAPIError(w, "unknown endpoint", http.StatusNotFound)
+}
+
+func defaultFileName(mediaType string, data []byte) string {
+	switch mediaType {
+	case "image":
+		if len(data) > 3 && data[0] == 0xFF && data[1] == 0xD8 {
+			return "image.jpg"
+		}
+		if len(data) > 4 && string(data[:4]) == "GIF8" {
+			return "image.gif"
+		}
+		return "image.png"
+	case "video":
+		return "video.mp4"
+	default:
+		return "file"
+	}
 }
 
 func base64Decode(s string) ([]byte, error) {
