@@ -130,7 +130,7 @@ function MarketplaceTab() {
 function InstallModal({ app, onClose }: { app: any; onClose: () => void }) {
   const [bots, setBots] = useState<any[]>([]);
   const [botId, setBotId] = useState("");
-  const [handle, setHandle] = useState("");
+  const [handle, setHandle] = useState(app.slug || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState<{ handle: string; command?: string } | null>(null);
@@ -238,9 +238,9 @@ function InstallModal({ app, onClose }: { app: any; onClose: () => void }) {
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Handle（可选，用于 @提及）</label>
+              <label className="text-xs text-muted-foreground">Handle（用于 @提及，可清空）</label>
               <Input
-                placeholder="留空则只能通过 /command 触发"
+                placeholder={app.slug || "留空则只能通过 /command 触发"}
                 value={handle}
                 onChange={(e) => setHandle(e.target.value)}
                 className="h-8 text-xs font-mono"
