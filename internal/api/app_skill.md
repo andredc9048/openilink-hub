@@ -20,9 +20,36 @@ Two communication directions:
 In the OpeniLink Hub dashboard → Apps → Create App:
 - **Name**: Display name (e.g. "GitHub Integration")
 - **Slug**: Unique identifier (e.g. `github`, lowercase alphanumeric + hyphens)
-- **Commands**: Slash commands your App handles (e.g. `/github`)
+- **Commands**: Slash commands your App handles (see below)
 - **Events**: Event types your App subscribes to (e.g. `message.text`)
 - **Scopes**: Permissions your App needs (e.g. `messages.send`)
+
+#### Commands
+
+An App can register multiple slash commands. Each command has:
+
+| Field | Required | Description |
+|---|---|---|
+| `name` | Yes | Command name with `/` prefix (e.g. `/github`) |
+| `description` | No | What this command does |
+| `usage` | No | Usage hint (e.g. `/github subscribe owner/repo`) |
+
+Example — a GitHub App with multiple commands:
+
+```json
+[
+  {"name": "/github", "description": "General GitHub commands", "usage": "/github help"},
+  {"name": "/pr", "description": "List open PRs", "usage": "/pr [owner/repo]"},
+  {"name": "/issue", "description": "Create or list issues", "usage": "/issue create <title>"},
+  {"name": "/deploy", "description": "Trigger deployment", "usage": "/deploy <env> [branch]"}
+]
+```
+
+Users trigger commands by sending `/commandname args` in WeChat. The platform matches the first word after `/` against registered commands and routes to the corresponding App.
+
+If two Apps register the same command on the same Bot, both receive the event.
+
+Commands can also be triggered via `@handle /command args` if a handle is configured on the installation.
 
 ### 2. Install to a Bot
 
@@ -112,7 +139,7 @@ Group messages include `group`:
 
 ### Command Events
 
-When a user sends `/your_command args`:
+When a user sends `/command args` in WeChat, the platform parses the command name and routes it to Apps that registered it. Each App receives the same event independently.
 
 ```json
 {
@@ -136,6 +163,35 @@ When a user sends `/your_command args`:
     }
   }
 }
+```
+
+The `command` field contains the matched command name (e.g. `/github`), and `text` contains everything after it.
+
+Examples of how user input maps to the payload:
+
+| User sends | `command` | `text` |
+|---|---|---|
+| `/github list PRs` | `/github` | `list PRs` |
+| `/pr my-repo` | `/pr` | `my-repo` |
+| `/deploy prod main` | `/deploy` | `prod main` |
+| `/issue create fix bug` | `/issue` | `create fix bug` |
+| `@myapp /github list PRs` | `/github` | `list PRs` |
+
+Your App should dispatch on the `command` field to handle different commands:
+
+```python
+@app.route("/webhook", methods=["POST"])
+def handle():
+    data = request.json
+    if data["type"] == "command":
+        cmd = data["event"]["data"]
+        if cmd["command"] == "/github":
+            return handle_github(cmd["text"], cmd["sender"])
+        elif cmd["command"] == "/pr":
+            return handle_pr(cmd["text"], cmd["sender"])
+        elif cmd["command"] == "/deploy":
+            return handle_deploy(cmd["text"], cmd["sender"])
+    return jsonify({"ok": True})
 ```
 
 Commands can also be triggered via `@handle args` if a handle is configured on the installation.
