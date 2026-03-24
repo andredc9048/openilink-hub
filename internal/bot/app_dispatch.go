@@ -187,8 +187,12 @@ func (m *Manager) sendAppMedia(ctx context.Context, inst *Instance, to, contextT
 	var err error
 
 	if result.ReplyBase64 != "" {
-		// Decode base64 directly
-		data, err = base64.StdEncoding.DecodeString(result.ReplyBase64)
+		// Decode base64 (supports data URI prefix: data:image/png;base64,...)
+		b64, mime := parseBase64(result.ReplyBase64)
+		if mime != "" && result.ReplyName == "" {
+			result.ReplyName = fileNameFromMIME(mime)
+		}
+		data, err = base64.StdEncoding.DecodeString(b64)
 		if err != nil {
 			slog.Error("app media base64 decode failed", "err", err)
 			if result.Reply != "" {
@@ -261,6 +265,55 @@ func (m *Manager) sendAppMedia(ctx context.Context, inst *Instance, to, contextT
 	m.db.SaveMessage(&database.Message{
 		BotID: inst.DBID, Direction: "outbound", ToUserID: to, MessageType: 2, ItemList: itemList,
 	})
+}
+
+// parseBase64 extracts pure base64 and MIME type from a string that may be
+// a data URI (data:image/png;base64,iVBOR...) or plain base64.
+func parseBase64(s string) (b64, mime string) {
+	if strings.HasPrefix(s, "data:") {
+		// data:image/png;base64,iVBOR...
+		commaIdx := strings.Index(s, ",")
+		if commaIdx > 0 {
+			header := s[5:commaIdx] // "image/png;base64"
+			b64 = s[commaIdx+1:]
+			semicolonIdx := strings.Index(header, ";")
+			if semicolonIdx > 0 {
+				mime = header[:semicolonIdx]
+			} else {
+				mime = header
+			}
+			return
+		}
+	}
+	return s, ""
+}
+
+// fileNameFromMIME returns a default filename for a MIME type.
+func fileNameFromMIME(mime string) string {
+	switch mime {
+	case "image/png":
+		return "image.png"
+	case "image/jpeg":
+		return "image.jpg"
+	case "image/gif":
+		return "image.gif"
+	case "image/webp":
+		return "image.webp"
+	case "video/mp4":
+		return "video.mp4"
+	case "audio/mpeg":
+		return "audio.mp3"
+	case "application/pdf":
+		return "file.pdf"
+	default:
+		if strings.HasPrefix(mime, "image/") {
+			return "image." + strings.TrimPrefix(mime, "image/")
+		}
+		if strings.HasPrefix(mime, "video/") {
+			return "video." + strings.TrimPrefix(mime, "video/")
+		}
+		return "file"
+	}
 }
 
 func groupInfo(msg provider.InboundMessage) any {

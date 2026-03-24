@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/openilink/openilink-hub/internal/database"
@@ -113,10 +114,14 @@ func (s *Server) handleBotAPISend(w http.ResponseWriter, r *http.Request) {
 		var mediaData []byte
 		if req.Base64 != "" {
 			var decErr error
-			mediaData, decErr = base64Decode(req.Base64)
+			var mime string
+			mediaData, mime, decErr = base64Decode(req.Base64)
 			if decErr != nil {
 				botAPIError(w, "invalid base64: "+decErr.Error(), http.StatusBadRequest)
 				return
+			}
+			if mime != "" && req.FileName == "" {
+				req.FileName = defaultFileNameFromMIME(mime)
 			}
 		} else if req.URL != "" {
 			var dlErr error
@@ -249,6 +254,29 @@ func (s *Server) handleBotAPINotFound(w http.ResponseWriter, r *http.Request) {
 	botAPIError(w, "unknown endpoint", http.StatusNotFound)
 }
 
+func defaultFileNameFromMIME(mime string) string {
+	switch mime {
+	case "image/png":
+		return "image.png"
+	case "image/jpeg":
+		return "image.jpg"
+	case "image/gif":
+		return "image.gif"
+	case "image/webp":
+		return "image.webp"
+	case "video/mp4":
+		return "video.mp4"
+	default:
+		if strings.HasPrefix(mime, "image/") {
+			return "image." + strings.TrimPrefix(mime, "image/")
+		}
+		if strings.HasPrefix(mime, "video/") {
+			return "video." + strings.TrimPrefix(mime, "video/")
+		}
+		return "file"
+	}
+}
+
 func defaultFileName(mediaType string, data []byte) string {
 	switch mediaType {
 	case "image":
@@ -266,8 +294,30 @@ func defaultFileName(mediaType string, data []byte) string {
 	}
 }
 
-func base64Decode(s string) ([]byte, error) {
-	return base64.StdEncoding.DecodeString(s)
+// parseBase64Input extracts pure base64 data and MIME type from a string
+// that may be a data URI (data:image/png;base64,...) or plain base64.
+func parseBase64Input(s string) (b64, mime string) {
+	if strings.HasPrefix(s, "data:") {
+		commaIdx := strings.Index(s, ",")
+		if commaIdx > 0 {
+			header := s[5:commaIdx]
+			b64 = s[commaIdx+1:]
+			semicolonIdx := strings.Index(header, ";")
+			if semicolonIdx > 0 {
+				mime = header[:semicolonIdx]
+			} else {
+				mime = header
+			}
+			return
+		}
+	}
+	return s, ""
+}
+
+func base64Decode(s string) ([]byte, string, error) {
+	b64, mime := parseBase64Input(s)
+	data, err := base64.StdEncoding.DecodeString(b64)
+	return data, mime, err
 }
 
 func downloadURL(ctx context.Context, url string) ([]byte, error) {
