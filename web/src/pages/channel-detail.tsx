@@ -10,7 +10,6 @@ import {
   Radio,
   RotateCw,
   Trash2,
-  Puzzle,
   Settings,
   ShieldCheck,
   Zap,
@@ -277,10 +276,7 @@ function WebhookTab({ channel, botId, onRefresh }: { channel: any; botId: string
     authToken: cfg.auth?.token || "",
     authName: cfg.auth?.name || "",
     authValue: cfg.auth?.value || cfg.auth?.secret || "",
-    scriptMode: cfg.plugin_id ? "plugin" : "manual" as "plugin" | "manual",
     script: cfg.script || "",
-    pluginId: cfg.plugin_id || "",
-    versionId: cfg.version_id || "",
   });
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
@@ -297,9 +293,7 @@ function WebhookTab({ channel, botId, onRefresh }: { channel: any; botId: string
         webhook_config: {
           url: form.url,
           auth,
-          plugin_id: form.scriptMode === "plugin" ? form.pluginId : undefined,
-          version_id: form.scriptMode === "plugin" ? form.versionId : undefined,
-          script: form.scriptMode === "manual" ? form.script || undefined : undefined,
+          script: form.script || undefined,
         },
       });
       toast({ title: "Webhook 配置已更新" });
@@ -351,22 +345,10 @@ function WebhookTab({ channel, botId, onRefresh }: { channel: any; botId: string
       <Card className="border-border/50">
         <CardHeader><CardTitle className="text-lg">脚本处理</CardTitle><CardDescription>在转发前对消息做处理。</CardDescription></CardHeader>
         <CardContent className="space-y-4">
-           <div className="flex gap-2 p-1 bg-muted rounded-lg w-fit">
-             <Button variant={form.scriptMode === "plugin" ? "secondary" : "ghost"} size="sm" className="h-7 px-3 text-[11px]" onClick={() => setForm({...form, scriptMode: "plugin"})}>插件市场</Button>
-             <Button variant={form.scriptMode === "manual" ? "secondary" : "ghost"} size="sm" className="h-7 px-3 text-[11px]" onClick={() => setForm({...form, scriptMode: "manual"})}>手动脚本</Button>
-           </div>
-           {form.scriptMode === "manual" ? (
-             <div className="space-y-2">
+           <div className="space-y-2">
                <textarea placeholder={`function onRequest(ctx) {\n  // 转换消息格式...\n}`} value={form.script} onChange={e => setForm({...form, script: e.target.value})} className="w-full h-40 bg-muted/30 border rounded-md p-3 font-mono text-[11px] focus:outline-none" />
                <p className="text-[10px] text-muted-foreground">脚本在安全沙箱中运行，支持 reply() 和修改 ctx.body。</p>
-             </div>
-           ) : (
-             <div className="py-10 text-center border border-dashed rounded-xl bg-muted/10">
-                <Puzzle className="h-8 w-8 text-muted-foreground opacity-20 mx-auto mb-3" />
-                <p className="text-xs text-muted-foreground">从插件市场选择。</p>
-                <Link to="/dashboard/webhook-plugins/marketplace"><Button variant="outline" size="sm" className="mt-4 h-8">插件市场</Button></Link>
-             </div>
-           )}
+           </div>
         </CardContent>
       </Card>
     </div>

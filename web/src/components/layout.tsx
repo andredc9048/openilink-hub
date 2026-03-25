@@ -103,9 +103,9 @@ export function Layout() {
     const path = `/${pathSegments.slice(0, index + 1).join("/")}`;
     const labels: Record<string, string> = {
       dashboard: "控制台", accounts: "账号管理",
-      apps: "应用", plugins: "插件", overview: "概览",
+      apps: "应用", overview: "概览",
       marketplace: "市场", my: "我的",
-      "webhook-plugins": "Webhook 插件", settings: "设置",
+      settings: "设置",
       profile: "个人资料", security: "安全",
       admin: "系统管理", users: "用户管理", reviews: "审核中心",
       channels: "转发规则", traces: "消息追踪",
@@ -185,7 +185,7 @@ export function Layout() {
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <SidebarMenuButton isActive={isActive("/dashboard/apps") || isActive("/dashboard/plugins")} tooltip="扩展">
+                  <SidebarMenuButton isActive={isActive("/dashboard/apps")} tooltip="扩展">
                     <Puzzle />
                     <span>扩展</span>
                   </SidebarMenuButton>
@@ -198,16 +198,6 @@ export function Layout() {
                     <SidebarMenuSubItem>
                       <SidebarMenuSubButton asChild size="sm" isActive={isActive("/dashboard/apps/my") || location.pathname === "/dashboard/apps"}>
                         <Link to="/dashboard/apps/my">我的应用</Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton asChild size="sm" isActive={isActive("/dashboard/plugins/marketplace") || location.pathname === "/dashboard/plugins"}>
-                        <Link to="/dashboard/plugins/marketplace">插件市场</Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton asChild size="sm" isActive={isActive("/dashboard/plugins/my")}>
-                        <Link to="/dashboard/plugins/my">我的插件</Link>
                       </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
                   </SidebarMenuSub>
