@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { api } from "../lib/api";
@@ -132,6 +132,7 @@ export function BotTracesTab({ botId }: { botId: string }) {
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
   const [traceSpans, setTraceSpans] = useState<TraceSpan[]>([]);
   const [traceLoading, setTraceLoading] = useState(false);
+  const fetchIdRef = useRef(0);
 
   async function load() {
     setLoading(true);
@@ -145,14 +146,16 @@ export function BotTracesTab({ botId }: { botId: string }) {
   useEffect(() => { load(); }, [botId]);
 
   async function handleRowClick(traceId: string) {
+    const id = ++fetchIdRef.current;
     setSelectedTraceId(traceId);
     setTraceSpans([]);
     setTraceLoading(true);
     try {
       const spans = await api.getTrace(botId, traceId);
+      if (fetchIdRef.current !== id) return;
       setTraceSpans(spans || []);
     } finally {
-      setTraceLoading(false);
+      if (fetchIdRef.current === id) setTraceLoading(false);
     }
   }
 
