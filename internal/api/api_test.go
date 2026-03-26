@@ -1008,6 +1008,471 @@ func TestAppAPI_AutoRevertOnCoreChange(t *testing.T) {
 	})
 }
 
+// ---------------------------------------------------------------------------
+// Test: Full App listing lifecycle (end-to-end)
+// ---------------------------------------------------------------------------
+
+func TestAppAPI_FullListingLifecycle(t *testing.T) {
+	env := setupTestEnv(t)
+
+	// Stand up a test HTTP server that responds to webhook verification challenges.
+	webhookServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		json.NewDecoder(r.Body).Decode(&req)
+		if req["type"] == "url_verification" {
+			json.NewEncoder(w).Encode(map[string]string{"challenge": req["challenge"].(string)})
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer webhookServer.Close()
+
+	// Step 1: Create app via API, then set version via store (version is not
+	// exposed in the create-app API but is required for listing submission).
+	tools, _ := json.Marshal([]map[string]string{{"name": "ping", "description": "pong"}})
+	events, _ := json.Marshal([]string{"command"})
+	scopes, _ := json.Marshal([]string{"message:write"})
+
+	var appID string
+	t.Run("1_create_app", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "POST", "/api/apps", map[string]any{
+			"name":        "Lifecycle App",
+			"slug":        "lifecycle-app",
+			"description": "An app for lifecycle testing",
+			"readme":      "# Lifecycle App\nFull lifecycle test.",
+			"tools":       json.RawMessage(tools),
+			"events":      json.RawMessage(events),
+			"scopes":      json.RawMessage(scopes),
+		}, withCookie(env.cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusCreated {
+			body := decodeJSON(t, resp)
+			t.Fatalf("expected 201, got %d: %v", resp.StatusCode, body)
+		}
+		body := decodeJSON(t, resp)
+		appID, _ = body["id"].(string)
+		if appID == "" {
+			t.Fatal("created app has no id")
+		}
+	})
+	if appID == "" {
+		t.Fatal("step 1 failed, cannot continue")
+	}
+
+	// Delete and recreate via store to include the version field
+	// (no API/store method exposes version update independently).
+	_ = env.store.DeleteApp(appID)
+	storeApp, err := env.store.CreateApp(&store.App{
+		OwnerID:     env.user.ID,
+		Name:        "Lifecycle App",
+		Slug:        "lifecycle-app",
+		Description: "An app for lifecycle testing",
+		Readme:      "# Lifecycle App\nFull lifecycle test.",
+		Version:     "1.0.0",
+		Tools:       tools,
+		Events:      events,
+		Scopes:      scopes,
+	})
+	if err != nil {
+		t.Fatalf("recreate app with version: %v", err)
+	}
+	appID = storeApp.ID
+
+	// Step 2: Set webhook_url.
+	t.Run("2_set_webhook_url", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "PUT", "/api/apps/"+appID, map[string]any{
+			"webhook_url": &webhookServer.URL,
+		}, withCookie(env.cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body := decodeJSON(t, resp)
+			t.Fatalf("expected 200, got %d: %v", resp.StatusCode, body)
+		}
+
+		app, _ := env.store.GetApp(appID)
+		if app.WebhookURL != webhookServer.URL {
+			t.Fatalf("webhook_url = %q, want %q", app.WebhookURL, webhookServer.URL)
+		}
+	})
+
+	// Step 3: Verify webhook URL.
+	t.Run("3_verify_webhook", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "POST", "/api/apps/"+appID+"/verify-url", nil,
+			withCookie(env.cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body := decodeJSON(t, resp)
+			t.Fatalf("expected 200, got %d: %v", resp.StatusCode, body)
+		}
+
+		app, _ := env.store.GetApp(appID)
+		if !app.WebhookVerified {
+			t.Fatal("webhook should be verified after successful challenge")
+		}
+	})
+
+	// Step 4: Submit for listing.
+	t.Run("4_submit_for_listing", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "POST", "/api/apps/"+appID+"/request-listing", nil,
+			withCookie(env.cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body := decodeJSON(t, resp)
+			t.Fatalf("expected 200, got %d: %v", resp.StatusCode, body)
+		}
+
+		app, _ := env.store.GetApp(appID)
+		if app.Listing != "pending" {
+			t.Fatalf("listing = %q, want %q", app.Listing, "pending")
+		}
+	})
+
+	// Step 5: Try modifying core field while pending — should be blocked.
+	t.Run("5_core_field_blocked_while_pending", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "PUT", "/api/apps/"+appID, map[string]any{
+			"tools": []map[string]string{{"name": "new-tool", "description": "blocked"}},
+		}, withCookie(env.cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected 403 for core field update during pending, got %d", resp.StatusCode)
+		}
+	})
+
+	// Step 6: Admin review — reject.
+	t.Run("6_admin_reject", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "PUT", "/api/admin/apps/"+appID+"/review-listing", map[string]any{
+			"approve": false,
+			"reason":  "needs work",
+		}, withCookie(env.cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body := decodeJSON(t, resp)
+			t.Fatalf("expected 200, got %d: %v", resp.StatusCode, body)
+		}
+	})
+
+	// Step 7: Verify app is rejected.
+	t.Run("7_verify_rejected", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "GET", "/api/apps/"+appID, nil,
+			withCookie(env.cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+		body := decodeJSON(t, resp)
+		if listing, _ := body["listing"].(string); listing != "rejected" {
+			t.Fatalf("listing = %q, want %q", listing, "rejected")
+		}
+		if reason, _ := body["listing_reject_reason"].(string); reason != "needs work" {
+			t.Fatalf("listing_reject_reason = %q, want %q", reason, "needs work")
+		}
+	})
+
+	// Step 8: Fix and resubmit.
+	t.Run("8_resubmit_after_rejection", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "POST", "/api/apps/"+appID+"/request-listing", nil,
+			withCookie(env.cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body := decodeJSON(t, resp)
+			t.Fatalf("expected 200, got %d: %v", resp.StatusCode, body)
+		}
+
+		app, _ := env.store.GetApp(appID)
+		if app.Listing != "pending" {
+			t.Fatalf("listing = %q, want %q", app.Listing, "pending")
+		}
+	})
+
+	// Step 9: Admin review — approve.
+	t.Run("9_admin_approve", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "PUT", "/api/admin/apps/"+appID+"/review-listing", map[string]any{
+			"approve": true,
+		}, withCookie(env.cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body := decodeJSON(t, resp)
+			t.Fatalf("expected 200, got %d: %v", resp.StatusCode, body)
+		}
+	})
+
+	// Step 10: Verify app is listed.
+	t.Run("10_verify_listed", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "GET", "/api/apps/"+appID, nil,
+			withCookie(env.cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+		body := decodeJSON(t, resp)
+		if listing, _ := body["listing"].(string); listing != "listed" {
+			t.Fatalf("listing = %q, want %q", listing, "listed")
+		}
+	})
+
+	// Step 11: Check registry output.
+	t.Run("11_registry_output", func(t *testing.T) {
+		// Enable the registry.
+		if err := env.store.SetConfig("registry.enabled", "true"); err != nil {
+			t.Fatalf("SetConfig: %v", err)
+		}
+
+		// Registry endpoint is public — no auth needed.
+		resp := doJSON(t, env.ts, "GET", "/api/registry/v1/apps.json", nil)
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+
+		var manifest struct {
+			Version int `json:"version"`
+			Apps    []struct {
+				Slug string `json:"slug"`
+				Name string `json:"name"`
+			} `json:"apps"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
+			t.Fatalf("decode manifest: %v", err)
+		}
+		if manifest.Version != 1 {
+			t.Errorf("manifest version = %d, want 1", manifest.Version)
+		}
+
+		found := false
+		for _, a := range manifest.Apps {
+			if a.Slug == "lifecycle-app" {
+				found = true
+				if a.Name != "Lifecycle App" {
+					t.Errorf("app name = %q, want %q", a.Name, "Lifecycle App")
+				}
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("listed app not found in registry manifest; apps = %+v", manifest.Apps)
+		}
+	})
+
+	// -----------------------------------------------------------------------
+	// Step 11b–11f: Installation verification steps (app is listed at this point)
+	// -----------------------------------------------------------------------
+
+	// Create a second user + session for non-owner operations.
+	user2, err := env.store.CreateUserFull("user2", "user2@test.com", "User Two", "hashed", string(store.RoleMember))
+	if err != nil {
+		t.Fatalf("CreateUserFull(user2): %v", err)
+	}
+	_ = env.store.UpdateUserStatus(user2.ID, store.StatusActive)
+	session2Token, err := auth.CreateSession(env.store, user2.ID)
+	if err != nil {
+		t.Fatalf("CreateSession(user2): %v", err)
+	}
+	cookie2 := &http.Cookie{Name: "session", Value: session2Token}
+
+	// Step 11b: Another user can see the listed app.
+	t.Run("11b_listed_app_visible_to_non_owner", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "GET", "/api/apps/"+appID, nil, withCookie(cookie2))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body := decodeJSON(t, resp)
+			t.Fatalf("expected 200, got %d: %v", resp.StatusCode, body)
+		}
+		body := decodeJSON(t, resp)
+		if name, _ := body["name"].(string); name != "Lifecycle App" {
+			t.Errorf("name = %q, want %q", name, "Lifecycle App")
+		}
+	})
+
+	// Create a bot for user2 (needed for installation steps).
+	bot2 := createTestBot(t, env.store, user2.ID, "User2 Bot")
+
+	// Step 11c: Another user installs the listed app.
+	var installationID, appToken string
+	t.Run("11c_non_owner_installs_listed_app", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "POST", "/api/apps/"+appID+"/install", map[string]any{
+			"bot_id": bot2.ID,
+			"handle": "test-install",
+		}, withCookie(cookie2))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusCreated {
+			body := decodeJSON(t, resp)
+			t.Fatalf("expected 201, got %d: %v", resp.StatusCode, body)
+		}
+		body := decodeJSON(t, resp)
+		installationID, _ = body["id"].(string)
+		appToken, _ = body["app_token"].(string)
+		if installationID == "" {
+			t.Fatal("installation has no id")
+		}
+		if appToken == "" {
+			t.Fatal("installation has no app_token")
+		}
+	})
+	if appToken == "" {
+		t.Fatal("step 11c failed (no token), cannot continue")
+	}
+
+	// Step 11d: Installation works — verify token authenticates.
+	// The app has message:write scope, so test POST /bot/v1/message/send.
+	// The bot isn't actually connected so we won't get 200, but auth/scope
+	// checks should pass (i.e. we must NOT get 401 or 403).
+	t.Run("11d_app_token_authenticates", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "POST", "/bot/v1/message/send",
+			map[string]string{"content": "hello from installed app"},
+			withBearer(appToken))
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusUnauthorized {
+			t.Fatal("expected token to be valid, got 401")
+		}
+		if resp.StatusCode == http.StatusForbidden {
+			body := decodeJSON(t, resp)
+			t.Fatalf("expected scope check to pass for message:write, got 403: %v", body)
+		}
+		// Any other status (500, 503, etc.) is acceptable — the bot isn't running.
+	})
+
+	// Step 11e: Registry manifest includes full app details, excludes secrets.
+	t.Run("11e_registry_manifest_details", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "GET", "/api/registry/v1/apps.json", nil)
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+
+		// Decode the full manifest to check individual app fields.
+		var raw struct {
+			Apps []map[string]any `json:"apps"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+			t.Fatalf("decode manifest: %v", err)
+		}
+
+		var found map[string]any
+		for _, a := range raw.Apps {
+			if slug, _ := a["slug"].(string); slug == "lifecycle-app" {
+				found = a
+				break
+			}
+		}
+		if found == nil {
+			t.Fatal("lifecycle-app not found in manifest")
+		}
+
+		// Verify essential fields are present.
+		if v, _ := found["webhook_url"].(string); v == "" {
+			t.Error("manifest app missing webhook_url")
+		}
+		if v, ok := found["tools"]; !ok || v == nil {
+			t.Error("manifest app missing tools")
+		}
+		if v, ok := found["events"]; !ok || v == nil {
+			t.Error("manifest app missing events")
+		}
+		if v, ok := found["scopes"]; !ok || v == nil {
+			t.Error("manifest app missing scopes")
+		}
+
+		// Verify webhook_secret is NOT in the manifest.
+		if _, ok := found["webhook_secret"]; ok {
+			t.Error("manifest app must not include webhook_secret")
+		}
+	})
+
+	// Step 11f: Unified install endpoint works for marketplace-style install.
+	// Admin user installs the same listed app to their own bot via
+	// POST /api/bots/{id}/apps with app_id.
+	adminBot := createTestBot(t, env.store, env.user.ID, "Admin Lifecycle Bot")
+	t.Run("11f_unified_install_endpoint", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "POST", "/api/bots/"+adminBot.ID+"/apps", map[string]any{
+			"app_id": appID,
+			"handle": "unified-test",
+		}, withCookie(env.cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusCreated {
+			body := decodeJSON(t, resp)
+			t.Fatalf("expected 201, got %d: %v", resp.StatusCode, body)
+		}
+		body := decodeJSON(t, resp)
+		if id, _ := body["id"].(string); id == "" {
+			t.Error("unified install returned no installation id")
+		}
+		if tok, _ := body["app_token"].(string); tok == "" {
+			t.Error("unified install returned no app_token")
+		}
+	})
+
+	// Step 12: Update core field on listed app — should auto-revert to pending.
+	t.Run("12_core_change_reverts_listed", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "PUT", "/api/apps/"+appID, map[string]any{
+			"scopes": []string{"message:write", "contact:read"},
+		}, withCookie(env.cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body := decodeJSON(t, resp)
+			t.Fatalf("expected 200, got %d: %v", resp.StatusCode, body)
+		}
+	})
+
+	// Step 13: Verify reverted to pending.
+	t.Run("13_verify_reverted_to_pending", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "GET", "/api/apps/"+appID, nil,
+			withCookie(env.cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+		body := decodeJSON(t, resp)
+		if listing, _ := body["listing"].(string); listing != "pending" {
+			t.Fatalf("listing = %q, want %q after core change", listing, "pending")
+		}
+	})
+
+	// Step 14: Withdraw listing.
+	t.Run("14_withdraw_listing", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "POST", "/api/apps/"+appID+"/withdraw-listing", nil,
+			withCookie(env.cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body := decodeJSON(t, resp)
+			t.Fatalf("expected 200, got %d: %v", resp.StatusCode, body)
+		}
+	})
+
+	// Step 15: Verify unlisted.
+	t.Run("15_verify_unlisted", func(t *testing.T) {
+		resp := doJSON(t, env.ts, "GET", "/api/apps/"+appID, nil,
+			withCookie(env.cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+		body := decodeJSON(t, resp)
+		if listing, _ := body["listing"].(string); listing != "unlisted" {
+			t.Fatalf("listing = %q, want %q", listing, "unlisted")
+		}
+	})
+}
+
 func containsSubstring(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(s) > 0 && contains(s, sub))
 }
