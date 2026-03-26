@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { AppIcon } from "../components/app-icon";
+import { parseTools } from "../components/tools-display";
 
 // ==================== Page ====================
 
@@ -214,6 +215,9 @@ function AppGrid({ apps, search, onInstall }: { apps: any[]; search: string; onI
             <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2 min-h-[2.5rem]">
               {app.description || "暂无描述"}
             </p>
+            {parseTools(app.tools).length > 0 && (
+              <span className="text-[10px] text-muted-foreground mt-1 inline-block">{parseTools(app.tools).length} 个命令</span>
+            )}
           </CardContent>
           <CardFooter className="bg-muted/30 pt-4 flex justify-between items-center px-6">
             <span className="text-xs font-bold text-muted-foreground">{app.author || app.owner_name || app.slug}</span>

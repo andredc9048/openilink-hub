@@ -36,6 +36,7 @@ import { Label } from "../components/ui/label";
 import { api } from "../lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { AppIcon } from "../components/app-icon";
+import { ToolsDisplay, parseTools } from "../components/tools-display";
 
 // ==================== Page ====================
 
@@ -145,6 +146,13 @@ export function InstallationDetailPage() {
 
       {/* Token & Usage */}
       <TokenSection app={app} inst={inst} />
+
+      {/* Tools (commands) */}
+      {parseTools(app?.tools).length > 0 && (
+        <Card className="space-y-3 p-5">
+          <ToolsDisplay tools={parseTools(app.tools)} />
+        </Card>
+      )}
 
       {/* App Config (config_schema) */}
       {app.config_schema && <AppConfigForm app={app} inst={inst} onUpdate={loadData} />}

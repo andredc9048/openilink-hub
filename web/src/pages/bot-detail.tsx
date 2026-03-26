@@ -28,6 +28,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AppIcon } from "../components/app-icon";
+import { parseTools } from "../components/tools-display";
 
 // ==================== Page ====================
 
@@ -311,6 +312,9 @@ export function BotDetailPage() {
                   </CardHeader>
                   <CardContent className="pb-4">
                     <p className="text-xs text-muted-foreground leading-relaxed">{app.description}</p>
+                    {parseTools(app.tools).length > 0 && (
+                      <span className="text-[10px] text-muted-foreground mt-1 inline-block">{parseTools(app.tools).length} 个命令</span>
+                    )}
                   </CardContent>
                   <CardFooter className="bg-muted/30 pt-3 flex justify-end px-6">
                     <Button size="sm" onClick={() => navigate(`/dashboard/accounts/${id}/install/${app.id}`)} className="h-8 rounded-full px-4 gap-1.5 font-bold text-xs shadow-lg shadow-primary/10">
@@ -366,6 +370,9 @@ export function BotDetailPage() {
                     <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2 min-h-[2.5rem]">
                       {app.description || "暂无描述"}
                     </p>
+                    {parseTools(app.tools).length > 0 && (
+                      <span className="text-[10px] text-muted-foreground mt-1 inline-block">{parseTools(app.tools).length} 个命令</span>
+                    )}
                   </CardContent>
                   <CardFooter className="bg-muted/30 pt-4 flex justify-between items-center px-6">
                     <span className="text-[10px] font-bold text-muted-foreground">{app.author || app.slug}</span>

@@ -11,6 +11,7 @@ import { api } from "../lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { AppIcon } from "../components/app-icon";
 import { SCOPE_DESCRIPTIONS } from "../lib/constants";
+import { ToolsDisplay, parseTools } from "../components/tools-display";
 
 export function InstallAppPage() {
   const { id: botId, appId } = useParams<{ id: string; appId: string }>();
@@ -116,6 +117,7 @@ export function InstallAppPage() {
     }
   }
 
+  const tools = parseTools(app.tools);
   const hasPermissions = readScopes.length > 0 || writeScopes.length > 0 || events.length > 0;
 
   return (
@@ -216,6 +218,13 @@ export function InstallAppPage() {
                 <p className="text-sm text-muted-foreground">
                   接收 @mention 消息并执行响应。
                 </p>
+              )}
+
+              {/* Tools (commands) */}
+              {tools.length > 0 && (
+                <div className="pt-2 border-t">
+                  <ToolsDisplay tools={tools} />
+                </div>
               )}
 
               {/* Handle */}
