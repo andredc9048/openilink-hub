@@ -46,6 +46,7 @@ type Manager struct {
 	baseURL   string              // Hub origin for proxy URLs
 	dlSem     chan struct{}        // semaphore for concurrent media downloads
 	appDisp   *appdelivery.Dispatcher // app event delivery
+	appWSHub  *appdelivery.WSHub      // app WebSocket connections
 }
 
 func NewManager(s store.Store, hub *relay.Hub, sinks []sink.Sink, st *storage.Storage, baseURL string) *Manager {
@@ -59,6 +60,12 @@ func NewManager(s store.Store, hub *relay.Hub, sinks []sink.Sink, st *storage.St
 		dlSem:     make(chan struct{}, maxConcurrentDownloads),
 		appDisp:   appdelivery.NewDispatcher(s),
 	}
+}
+
+// SetAppWSHub sets the WebSocket hub for app installations.
+// Called after both Manager and WSHub are created in main.go.
+func (m *Manager) SetAppWSHub(hub *appdelivery.WSHub) {
+	m.appWSHub = hub
 }
 
 func (m *Manager) StartAll(ctx context.Context) {

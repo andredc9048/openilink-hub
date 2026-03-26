@@ -7,6 +7,7 @@ import (
 	"github.com/openilink/openilink-hub/internal/auth"
 	"github.com/openilink/openilink-hub/internal/bot"
 	"github.com/openilink/openilink-hub/internal/config"
+	"github.com/openilink/openilink-hub/internal/app"
 	"github.com/openilink/openilink-hub/internal/registry"
 	"github.com/openilink/openilink-hub/internal/relay"
 	"github.com/openilink/openilink-hub/internal/storage"
@@ -24,6 +25,7 @@ type Server struct {
 	OAuthStates  *oauthStateStore
 	ObjectStore  *storage.Storage // optional
 	Registry     *registry.Client
+	AppWSHub     *app.WSHub
 }
 
 func cors(next http.Handler) http.Handler {
@@ -231,12 +233,12 @@ func (s *Server) Handler() http.Handler {
 	botAPI.HandleFunc("POST /bot/v1/messages/send", s.handleBotAPISend)
 	botAPI.HandleFunc("GET /bot/v1/contacts", s.handleBotAPIContacts)
 	botAPI.HandleFunc("GET /bot/v1/bot", s.handleBotAPIBotInfo)
-	// WebSocket placeholder
-	botAPI.HandleFunc("GET /bot/v1/ws", func(w http.ResponseWriter, r *http.Request) {
-		botAPIError(w, "not implemented", http.StatusNotImplemented)
-	})
 	botAPI.HandleFunc("/bot/", s.handleBotAPINotFound)
 	mux.Handle("/bot/", s.appTokenAuth(botAPI))
+
+	// WebSocket endpoints (auth via query param, outside appTokenAuth)
+	mux.HandleFunc("GET /bot/v1/ws", s.handleBotAPIWebSocket)          // per-installation
+	mux.HandleFunc("GET /bot/v1/app/ws", s.handleAppLevelWebSocket)    // per-app (all installations)
 
 	// Serve embedded frontend (production) or skip (dev mode uses vite)
 	if handler := web.Handler(); handler != nil {

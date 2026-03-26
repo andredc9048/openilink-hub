@@ -168,6 +168,8 @@ func main() {
 	mgr := bot.NewManager(s, hub, sinks, objStore, cfg.RPOrigin)
 	srv.BotManager = mgr
 	srv.Hub = hub
+	srv.AppWSHub = api.NewAppWSHub()
+	mgr.SetAppWSHub(srv.AppWSHub)
 
 	// Start all saved bots
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

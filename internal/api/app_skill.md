@@ -274,16 +274,53 @@ Your App must respond within **3 seconds**. Process asynchronously if needed.
 
 ## WebSocket Protocol
 
-Apps can connect via WebSocket instead of receiving webhook POSTs.
+Apps can connect via WebSocket to receive events in real-time instead of webhook POSTs.
+
+### Per-Installation WS
+
+Each installation connects with its own `app_token`:
 
 ```
-GET /bot/v1/ws
-Authorization: Bearer {app_token}
+GET /bot/v1/ws?token={app_token}
 ```
 
-The WebSocket receives the same event envelopes as webhooks. Send replies as JSON messages on the socket.
+Receives events for this one installation only. Suitable for self-hosted integrations, scripts, Bridge App.
 
-**Status**: WebSocket support is planned. Currently returns 501.
+### Per-App WS
+
+Hosted apps can use a single connection to receive events for ALL installations on this Hub:
+
+```
+GET /bot/v1/app/ws?app_id={app_id}&secret={webhook_secret}
+```
+
+Each event includes `installation_id` to differentiate. Suitable for hosted third-party apps (e.g., GitHub Integration) that serve many installations.
+
+### WS Protocol
+
+**Server → Client:**
+```jsonc
+{"type":"init", "data":{"installation_id":"...", "bot_id":"...", "app_slug":"..."}}
+{"type":"event", "v":1, "trace_id":"tr_xxx", "installation_id":"inst_xxx", "bot":{"id":"bot_xxx"}, "event":{...}}
+{"type":"ack", "req_id":"r1", "ok":true}
+{"type":"error", "req_id":"r1", "error":"..."}
+{"type":"pong"}
+```
+
+**Client → Server:**
+```jsonc
+{"type":"ping"}
+{"type":"send", "req_id":"r1", "content":"hello"}
+```
+
+### Event Delivery Priority
+
+```
+1. Installation WS connected → push via WS
+2. App-level WS connected → push via WS
+3. webhook_url configured → POST via HTTP
+4. None → event dropped
+```
 
 ## OAuth Install Flow (PKCE)
 
@@ -384,13 +421,21 @@ Response:
 }
 ```
 
-### WebSocket
+### WebSocket (Per-Installation)
 
 ```
-GET /bot/v1/ws
+GET /bot/v1/ws?token={app_token}
 ```
 
-**Status**: Planned, returns 501.
+Real-time bidirectional connection. See **WebSocket Protocol** section above.
+
+### WebSocket (Per-App)
+
+```
+GET /bot/v1/app/ws?app_id={app_id}&secret={webhook_secret}
+```
+
+Single connection receives events for ALL installations of this app. See **WebSocket Protocol** section above.
 
 ### Error Responses
 
@@ -531,7 +576,8 @@ PUT /api/admin/config/registry
 | POST | `/bot/v1/message/send` | `message:write` | Send message |
 | GET | `/bot/v1/contact` | `contact:read` | List contacts |
 | GET | `/bot/v1/info` | `bot:read` | Get bot info |
-| GET | `/bot/v1/ws` | - | WebSocket (planned) |
+| GET | `/bot/v1/ws` | - | WebSocket (per-installation) |
+| GET | `/bot/v1/app/ws` | - | WebSocket (per-app, all installations) |
 
 Legacy paths (`/bot/v1/messages/send`, `/bot/v1/contacts`, `/bot/v1/bot`) are supported for backward compatibility.
 
