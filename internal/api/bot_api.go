@@ -52,11 +52,6 @@ func (s *Server) handleBotAPISend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.To == "" {
-		botAPIError(w, "to is required", http.StatusBadRequest)
-		return
-	}
-
 	if req.Type == "" {
 		req.Type = "text"
 	}

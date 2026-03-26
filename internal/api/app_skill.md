@@ -242,7 +242,7 @@ HUB = "https://hub.openilink.com"
 headers = {"Authorization": f"Bearer {app_token}"}
 
 requests.post(f"{HUB}/bot/v1/message/send", headers=headers,
-    json={"to": to, "type": "text", "content": "hello"})
+    json={"type": "text", "content": "hello"})
 ```
 
 ### Request Signing
@@ -342,9 +342,9 @@ POST /bot/v1/message/send
 
 | Field | Required | Description |
 |---|---|---|
-| `to` | Yes | Recipient ID |
 | `type` | No | `text` (default), `image`, `video`, `file` |
 | `content` | Yes* | Text content (*required for text type) |
+| `to` | No | 指定接收人（默认发给 Bot 自身，由 Bot 转发） |
 | `url` | No | Media URL |
 | `base64` | No | Base64-encoded media data |
 | `filename` | No | Filename for media |
@@ -561,7 +561,7 @@ Every event includes a `trace_id`. Pass it when calling the Bot API to link asyn
 ```python
 requests.post(f"{HUB}/bot/v1/message/send",
     headers={"Authorization": f"Bearer {token}"},
-    json={"to": sender_id, "content": "Done!", "trace_id": trace_id})
+    json={"content": "Done!", "trace_id": trace_id})
 ```
 
 ## Tips

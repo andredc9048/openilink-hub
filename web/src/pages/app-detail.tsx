@@ -224,7 +224,7 @@ function BasicInfoSection({ app, onUpdate }: { app: any; onUpdate: () => void })
             <p className="font-sans text-xs font-medium text-foreground">HTTP 发消息</p>
             <pre className="p-2 rounded-lg bg-muted/30 border overflow-x-auto whitespace-pre-wrap">{`curl -X POST ${window.location.origin}/bot/v1/message/send \\
   -H "Authorization: Bearer <your_token>" \\
-  -d '{"to":"wxid_xxx","content":"hello"}'`}</pre>
+  -d '{"content":"hello"}'`}</pre>
             <p className="font-sans text-xs font-medium text-foreground">WebSocket 连接</p>
             <pre className="p-2 rounded-lg bg-muted/30 border overflow-x-auto whitespace-pre-wrap">{`wss://${window.location.origin.replace(/^https?:\/\//, "")}/bot/v1/ws?token=<your_token>`}</pre>
           </div>
@@ -267,7 +267,7 @@ function IntegrationTokenGuide({ app }: { app: any }) {
           <p className="font-medium text-foreground">HTTP 发消息</p>
           <pre className="p-2 rounded-lg bg-muted/30 border font-mono overflow-x-auto whitespace-pre-wrap">{`curl -X POST ${hubUrl}/bot/v1/message/send \\
   -H "Authorization: Bearer {token}" \\
-  -d '{"to":"wxid_xxx","content":"hello"}'`}</pre>
+  -d '{"content":"hello"}'`}</pre>
         </div>
         <div className="space-y-1">
           <p className="font-medium text-foreground">WebSocket 连接</p>

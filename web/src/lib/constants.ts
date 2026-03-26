@@ -47,14 +47,14 @@ wss://{hub_url}/bot/v1/ws?token={your_token}
 
 通过 WebSocket 发送：
 \`\`\`json
-{"type":"send","to":"wxid_xxx","content":"hello"}
+{"type":"send","content":"hello"}
 \`\`\`
 
 或通过 HTTP：
 \`\`\`bash
 curl -X POST {hub_url}/bot/v1/message/send \\
   -H "Authorization: Bearer {your_token}" \\
-  -d '{"to":"wxid_xxx","content":"hello"}'
+  -d '{"content":"hello"}'
 \`\`\``,
   },
   {
@@ -75,7 +75,7 @@ curl -X POST {hub_url}/bot/v1/message/send \\
 curl -X POST {hub_url}/bot/v1/message/send \\
   -H "Authorization: Bearer {your_token}" \\
   -H "Content-Type: application/json" \\
-  -d '{"to":"wxid_xxx","content":"hello"}'
+  -d '{"content":"hello"}'
 \`\`\`
 
 ### 发送图片
@@ -83,7 +83,7 @@ curl -X POST {hub_url}/bot/v1/message/send \\
 \`\`\`bash
 curl -X POST {hub_url}/bot/v1/message/send \\
   -H "Authorization: Bearer {your_token}" \\
-  -d '{"to":"wxid_xxx","type":"image","url":"https://example.com/img.png"}'
+  -d '{"type":"image","url":"https://example.com/img.png"}'
 \`\`\``,
   },
   {

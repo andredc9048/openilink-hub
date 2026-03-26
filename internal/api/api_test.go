@@ -172,7 +172,7 @@ func TestBotAPI_ScopeChecks(t *testing.T) {
 
 	t.Run("message:write scope allows send", func(t *testing.T) {
 		resp := doJSON(t, env.ts, "POST", "/bot/v1/message/send",
-			map[string]string{"to": "user1", "content": "hello"},
+			map[string]string{"content": "hello"},
 			withBearer(instMsgOnly.AppToken))
 		defer resp.Body.Close()
 		// Scope check should pass. We expect some non-403 error because
@@ -264,7 +264,7 @@ func TestBotAPI_ScopeChecks(t *testing.T) {
 		_ = env.store.UpdateInstallation(instMsgOnly.ID, instMsgOnly.Handle, instMsgOnly.Config, instMsgOnly.Scopes, false)
 
 		resp := doJSON(t, env.ts, "POST", "/bot/v1/message/send",
-			map[string]string{"to": "user1", "content": "hello"},
+			map[string]string{"content": "hello"},
 			withBearer(instMsgOnly.AppToken))
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusForbidden {
@@ -664,7 +664,7 @@ func TestBotAPI_NewScopeFormat(t *testing.T) {
 		scope  string
 		body   any
 	}{
-		{"POST", "/bot/v1/message/send", "message:write", map[string]string{"to": "u1", "content": "hi"}},
+		{"POST", "/bot/v1/message/send", "message:write", map[string]string{"content": "hi"}},
 		{"GET", "/bot/v1/contact", "contact:read", nil},
 		{"GET", "/bot/v1/info", "bot:read", nil},
 	}

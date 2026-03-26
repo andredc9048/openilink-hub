@@ -251,7 +251,7 @@ function TokenSection({ app, inst }: { app: any; inst: any }) {
               HTTP 发消息
             </summary>
             <pre className="mt-2 p-3 rounded-lg bg-muted/30 border text-xs font-mono overflow-x-auto whitespace-pre-wrap">
-              {`curl -X POST ${hubUrl}/bot/v1/message/send \\\n  -H "Authorization: Bearer ${token || "<your_token>"}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"to":"wxid_xxx","content":"hello"}'`}
+              {`curl -X POST ${hubUrl}/bot/v1/message/send \\\n  -H "Authorization: Bearer ${token || "<your_token>"}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"content":"hello"}'`}
             </pre>
           </details>
         </div>

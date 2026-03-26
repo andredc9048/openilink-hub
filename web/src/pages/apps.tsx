@@ -493,7 +493,7 @@ function InstallResultScreen({ result, onClose }: { result: InstallResult; onClo
               </summary>
               <pre className="mt-2 p-3 rounded-lg bg-muted/30 border text-xs font-mono overflow-x-auto whitespace-pre-wrap">{`curl -X POST ${hubUrl}/bot/v1/message/send \\
   -H "Authorization: Bearer ${result.token}" \\
-  -d '{"to":"wxid_xxx","content":"hello"}'`}</pre>
+  -d '{"content":"hello"}'`}</pre>
             </details>
 
             {(result.templateId === "websocket-app" || result.templateId === "openclaw-channel") && (
