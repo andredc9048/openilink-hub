@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -52,6 +53,19 @@ func (s *Server) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// If app has OAuth setup URL, don't create installation now — redirect to OAuth.
+	// The OAuth exchange will create the installation.
+	if app.OAuthSetupURL != "" {
+		oauthRedirectURL := fmt.Sprintf("%s/api/apps/%s/oauth/setup?bot_id=%s", s.Config.RPOrigin, app.ID, req.BotID)
+		slog.Info("install: redirecting to OAuth", "app", app.Slug, "bot", req.BotID, "url", oauthRedirectURL)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"needs_oauth":      true,
+			"oauth_redirect":   oauthRedirectURL,
+		})
+		return
+	}
+
 	slog.Info("install: creating", "app", app.Slug, "bot", req.BotID, "handle", handle)
 
 	inst, err := s.Store.InstallApp(app.ID, req.BotID)
@@ -74,7 +88,7 @@ func (s *Server) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 	inst.Scopes = scopes
 
 	// Auto-notify App via oauth_redirect_url (for apps without oauth_setup_url)
-	if app.OAuthSetupURL == "" && app.OAuthRedirectURL != "" {
+	if app.OAuthRedirectURL != "" {
 		slog.Info("install: notifying app", "inst", inst.ID, "oauth_redirect_url", app.OAuthRedirectURL)
 		s.notifyAppInstalled(app, inst)
 		if updated, err := s.Store.GetInstallation(inst.ID); err == nil {
@@ -84,19 +98,6 @@ func (s *Server) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-
-	// If app has OAuth setup URL, tell the frontend to redirect
-	if app.OAuthSetupURL != "" {
-		json.NewEncoder(w).Encode(map[string]any{
-			"id":              inst.ID,
-			"app_id":          inst.AppID,
-			"app_token":       inst.AppToken,
-			"bot_id":          inst.BotID,
-			"oauth_setup_url": app.OAuthSetupURL,
-			"needs_oauth":     true,
-		})
-		return
-	}
 	json.NewEncoder(w).Encode(inst)
 }
 
@@ -546,6 +547,18 @@ func (s *Server) handleUnifiedInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If app has OAuth setup URL, don't create installation — redirect to OAuth.
+	if app.OAuthSetupURL != "" {
+		oauthRedirectURL := fmt.Sprintf("%s/api/apps/%s/oauth/setup?bot_id=%s", s.Config.RPOrigin, app.ID, botID)
+		slog.Info("unified install: redirecting to OAuth", "app", app.Slug, "bot", botID)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"needs_oauth":    true,
+			"oauth_redirect": oauthRedirectURL,
+		})
+		return
+	}
+
 	// Create installation
 	inst, err := s.Store.InstallApp(app.ID, botID)
 	if err != nil {
@@ -565,8 +578,8 @@ func (s *Server) handleUnifiedInstall(w http.ResponseWriter, r *http.Request) {
 		inst.Scopes = scopes
 	}
 
-	// Auto-notify for apps with redirect URL (no setup URL)
-	if app.OAuthSetupURL == "" && app.OAuthRedirectURL != "" {
+	// Auto-notify for apps with redirect URL
+	if app.OAuthRedirectURL != "" {
 		s.notifyAppInstalled(app, inst)
 		if updated, _ := s.Store.GetInstallation(inst.ID); updated != nil {
 			inst = updated
@@ -575,19 +588,6 @@ func (s *Server) handleUnifiedInstall(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-
-	// If app has OAuth setup URL, tell the frontend to redirect
-	if app.OAuthSetupURL != "" {
-		json.NewEncoder(w).Encode(map[string]any{
-			"id":              inst.ID,
-			"app_id":          inst.AppID,
-			"app_token":       inst.AppToken,
-			"bot_id":          inst.BotID,
-			"oauth_setup_url": app.OAuthSetupURL,
-			"needs_oauth":     true,
-		})
-		return
-	}
 	json.NewEncoder(w).Encode(inst)
 }
 

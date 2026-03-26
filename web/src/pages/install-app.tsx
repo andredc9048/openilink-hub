@@ -63,10 +63,9 @@ export function InstallAppPage() {
         scopes: app.scopes || [],
       });
 
-      // If app requires OAuth setup, redirect to the setup URL
-      if (result?.needs_oauth && result?.oauth_setup_url) {
-        const setupUrl = `${result.oauth_setup_url}?hub=${encodeURIComponent(window.location.origin)}&app_id=${encodeURIComponent(appId!)}&bot_id=${encodeURIComponent(botId!)}&state=${encodeURIComponent(result.id)}`;
-        window.location.href = setupUrl;
+      // If app requires OAuth setup, redirect to Hub's OAuth endpoint
+      if (result?.needs_oauth && result?.oauth_redirect) {
+        window.location.href = result.oauth_redirect;
         return;
       }
 
