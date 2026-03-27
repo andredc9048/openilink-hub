@@ -215,7 +215,7 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 	// During review, only allow cosmetic updates (readme, description, icon).
 	// Core changes require withdrawing the listing request first.
 	if app.Listing == "pending" {
-		if req.WebhookURL != nil || req.Tools != nil || req.Events != nil || req.Scopes != nil || req.ConfigSchema != nil {
+		if req.WebhookURL != nil || req.Tools != nil || req.Events != nil || req.Scopes != nil || req.ConfigSchema != nil || req.Version != nil {
 			jsonError(w, "cannot modify core fields while listing is pending review. Withdraw the request first or wait for review.", http.StatusForbidden)
 			return
 		}
@@ -601,7 +601,23 @@ func (s *Server) handleAdminSetListing(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/apps/{id}/reviews
 func (s *Server) handleListAppReviews(w http.ResponseWriter, r *http.Request) {
+	userID := auth.UserIDFromContext(r.Context())
 	appID := r.PathValue("id")
+
+	app, err := s.Store.GetApp(appID)
+	if err != nil {
+		jsonError(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	// Only owner or admin can view review history
+	user, _ := s.Store.GetUserByID(userID)
+	isAdmin := user != nil && store.IsAdmin(user.Role)
+	if app.OwnerID != userID && !isAdmin {
+		jsonError(w, "not found", http.StatusNotFound)
+		return
+	}
+
 	reviews, err := s.Store.ListAppReviews(appID)
 	if err != nil {
 		jsonError(w, "list reviews failed", http.StatusInternalServerError)
