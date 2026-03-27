@@ -89,8 +89,40 @@ func (s *AI) reply(d Delivery) {
 		return
 	}
 
+	// Build installationID → appName map for status messages
+	toolAppNames := make(map[string]string)
+	for _, t := range tools {
+		if idx := strings.Index(t.Function.Name, "__"); idx >= 0 {
+			instID := t.Function.Name[:idx]
+			// Extract app name from description "[AppName] ..."
+			desc := t.Function.Description
+			if len(desc) > 1 && desc[0] == '[' {
+				if end := strings.Index(desc, "]"); end > 0 {
+					toolAppNames[instID] = desc[1:end]
+				}
+			}
+		}
+	}
+
 	// Tool call loop
 	for round := 0; round < ai.MaxToolRounds && len(result.ToolCalls) > 0; round++ {
+		// Send status message to user about tool calls
+		for _, tc := range result.ToolCalls {
+			toolName := tc.Name
+			appName := ""
+			if idx := strings.Index(tc.Name, "__"); idx >= 0 {
+				appName = toolAppNames[tc.Name[:idx]]
+				toolName = tc.Name[idx+2:]
+			}
+			status := fmt.Sprintf("🔧 调用 %s ...", toolName)
+			if appName != "" {
+				status = fmt.Sprintf("🔧 调用 %s 的 %s ...", appName, toolName)
+			}
+			d.Provider.Send(ctx, provider.OutboundMessage{
+				Recipient: sender, Text: status,
+			})
+		}
+
 		// Record assistant's tool_calls in messages
 		messages = ai.AppendAssistantToolCalls(messages, result.ToolCalls)
 
