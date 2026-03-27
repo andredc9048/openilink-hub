@@ -15,6 +15,8 @@ import {
   Terminal,
   Sliders,
   ChevronRight,
+  ShieldCheck,
+  Zap,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -45,13 +47,14 @@ import { Skeleton } from "../components/ui/skeleton";
 import { Switch } from "../components/ui/switch";
 import { Label } from "../components/ui/label";
 import { api, botDisplayName } from "../lib/api";
+import { SCOPE_DESCRIPTIONS, EVENT_TYPES } from "../lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { AppIcon } from "../components/app-icon";
 import { ToolsDisplay, parseTools } from "../components/tools-display";
 
 // ==================== Nav Definition ====================
 
-type SectionKey = "token" | "config" | "app-config" | "tools" | "event-logs" | "api-logs";
+type SectionKey = "token" | "config" | "app-config" | "tools" | "permissions" | "event-logs" | "api-logs";
 
 function buildNavSections(app: any, inst?: any) {
   const items: { key: SectionKey; label: string; icon: any }[] = [
@@ -59,6 +62,11 @@ function buildNavSections(app: any, inst?: any) {
   ];
   if (parseTools(app?.tools).length > 0 || parseTools(inst?.tools).length > 0) {
     items.push({ key: "tools", label: "命令 / 工具", icon: Terminal });
+  }
+  const instScopes: string[] = inst?.scopes || [];
+  const events: string[] = app?.events || [];
+  if (instScopes.length > 0 || events.length > 0) {
+    items.push({ key: "permissions", label: "权限", icon: ShieldCheck });
   }
   if (app?.config_schema) {
     let parsed: any = {};
@@ -300,6 +308,7 @@ export function InstallationDetailPage() {
                 </div>
               );
             })()}
+          {section === "permissions" && <PermissionsSection app={app} inst={inst} />}
           {section === "app-config" && <AppConfigForm app={app} inst={inst} onUpdate={loadData} />}
           {section === "config" && (
             <ConfigSection
@@ -896,6 +905,98 @@ function ApiLogsSection({ appId, instId }: { appId: string; instId: string }) {
             </TableBody>
           </Table>
         )}
+      </Card>
+    </div>
+  );
+}
+
+// ==================== Permissions Section ====================
+
+function PermissionsSection({ app, inst }: { app: any; inst: any }) {
+  const scopes: string[] = inst?.scopes || [];
+  const events: string[] = app?.events || [];
+  const readScopes = scopes.filter((s: string) => s.endsWith(":read"));
+  const writeScopes = scopes.filter((s: string) => s.endsWith(":write"));
+  const otherScopes = scopes.filter(
+    (s: string) => !s.endsWith(":read") && !s.endsWith(":write")
+  );
+
+  function eventLabelEntry(key: string): { label: string; showKey: boolean } {
+    const found = EVENT_TYPES.find((e) => e.key === key);
+    return found ? { label: found.label, showKey: true } : { label: key, showKey: false };
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-base font-semibold">权限</h2>
+        <p className="text-sm text-muted-foreground mt-1">此应用所申请的权限范围。</p>
+      </div>
+
+      <Card>
+        <CardContent className="pt-6 space-y-4">
+          {readScopes.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">读取权限</p>
+              <div className="space-y-1.5">
+                {readScopes.map((scope: string) => (
+                  <div key={scope} className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Eye className="h-3.5 w-3.5 shrink-0" />
+                    <span>{SCOPE_DESCRIPTIONS[scope] || scope}</span>
+                    <span className="font-mono text-xs ml-auto text-muted-foreground/60">{scope}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {writeScopes.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">写入权限</p>
+              <div className="space-y-1.5">
+                {writeScopes.map((scope: string) => (
+                  <div key={scope} className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Zap className="h-3.5 w-3.5 shrink-0" />
+                    <span>{SCOPE_DESCRIPTIONS[scope] || scope}</span>
+                    <span className="font-mono text-xs ml-auto text-muted-foreground/60">{scope}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {otherScopes.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">其他权限</p>
+              <div className="space-y-1.5">
+                {otherScopes.map((scope: string) => (
+                  <div key={scope} className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+                    <span>{SCOPE_DESCRIPTIONS[scope] || scope}</span>
+                    <span className="font-mono text-xs ml-auto text-muted-foreground/60">{scope}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {events.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">订阅事件</p>
+              <div className="flex flex-wrap gap-1.5">
+                {events.map((event: string) => {
+                  const { label, showKey } = eventLabelEntry(event);
+                  return (
+                    <Badge key={event} variant="outline" className="text-xs">
+                      {label}
+                      {showKey && <span className="font-mono text-muted-foreground/60 ml-1">· {event}</span>}
+                    </Badge>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </CardContent>
       </Card>
     </div>
   );
