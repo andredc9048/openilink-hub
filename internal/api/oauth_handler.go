@@ -397,9 +397,11 @@ func (s *Server) findOrCreateOAuthUser(provider, providerID, username, email, av
 		return nil, err
 	}
 
-	// Try to find existing user by email
+	// Try to find existing user by email (only for trusted built-in providers).
+	// OIDC providers are not trusted for email auto-linking because the email
+	// claim may be unverified, enabling account takeover.
 	var user *store.User
-	if email != "" {
+	if email != "" && !strings.HasPrefix(provider, "oidc_") {
 		user, err = s.Store.GetUserByEmail(email)
 		if err != nil && err != sql.ErrNoRows {
 			return nil, err

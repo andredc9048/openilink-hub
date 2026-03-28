@@ -70,6 +70,12 @@ func discoverOIDC(ctx context.Context, issuerURL string) (authURL, tokenURL, use
 	if err := provider.Claims(&claims); err == nil {
 		userinfoURL = claims.UserInfoURL
 	}
+	// Validate discovered endpoints use HTTPS to prevent SSRF
+	for _, u := range []string{authURL, tokenURL, userinfoURL} {
+		if u != "" && !strings.HasPrefix(u, "https://") {
+			return "", "", "", fmt.Errorf("discovered endpoint is not HTTPS: %s", u)
+		}
+	}
 	return authURL, tokenURL, userinfoURL, nil
 }
 
@@ -313,7 +319,8 @@ func (s *Server) handleSetOIDCConfig(w http.ResponseWriter, r *http.Request) {
 	// Run OIDC Discovery
 	authURL, tokenURL, userinfoURL, err := discoverOIDC(r.Context(), req.IssuerURL)
 	if err != nil {
-		jsonError(w, "OIDC Discovery failed: "+err.Error(), http.StatusBadRequest)
+		slog.Error("OIDC discovery failed", "issuer", req.IssuerURL, "err", err)
+		jsonError(w, "OIDC Discovery failed, check issuer URL", http.StatusBadRequest)
 		return
 	}
 
