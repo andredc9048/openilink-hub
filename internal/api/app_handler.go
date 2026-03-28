@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -16,6 +18,7 @@ var slugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$`)
 
 // nameToSlug converts an app name to a URL-friendly slug.
 // Non-ASCII and non-alphanumeric characters are replaced with hyphens.
+// If the result is too short (< 3 chars), a random suffix is appended.
 func nameToSlug(name string) string {
 	s := strings.ToLower(strings.TrimSpace(name))
 	var b strings.Builder
@@ -32,6 +35,17 @@ func nameToSlug(name string) string {
 	if len(slug) > 40 {
 		slug = slug[:40]
 		slug = strings.TrimRight(slug, "-")
+	}
+	// Pad short slugs with random suffix so they pass the 3-char minimum
+	if len(slug) < 3 {
+		rnd := make([]byte, 4)
+		rand.Read(rnd)
+		suffix := hex.EncodeToString(rnd)
+		if slug == "" {
+			slug = "app-" + suffix
+		} else {
+			slug = slug + "-" + suffix
+		}
 	}
 	return slug
 }
