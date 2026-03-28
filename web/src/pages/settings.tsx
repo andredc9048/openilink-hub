@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -20,7 +20,6 @@ import {
   Smartphone,
   Fingerprint,
   Clock,
-  Pencil,
 } from "lucide-react";
 import { useTheme, type Theme } from "../lib/theme";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -350,6 +349,64 @@ function ChangePasswordSection() {
 
 const isXiaomiDevice = () => /xiaomi|redmi|miui|hyperos/i.test(navigator.userAgent);
 
+function PasskeyNameEditor({ passkey, onSave, onError }: {
+  passkey: { id: string; name: string };
+  onSave: () => void;
+  onError: (msg: string) => void;
+}) {
+  const [editing, setEditing] = useState(!passkey.name);
+  const [value, setValue] = useState(passkey.name || "Passkey");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  async function save() {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === passkey.name) {
+      setValue(passkey.name || "Passkey");
+      setEditing(false);
+      return;
+    }
+    try {
+      await api.renamePasskey(passkey.id, trimmed);
+      setEditing(false);
+      onSave();
+    } catch (e: any) {
+      onError(e.message || "重命名失败");
+    }
+  }
+
+  if (editing) {
+    return (
+      <Input
+        ref={inputRef}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") save();
+          if (e.key === "Escape") { setValue(passkey.name || "Passkey"); setEditing(false); }
+        }}
+        className="h-6 text-xs font-bold px-1.5 py-0 w-32 bg-muted/30"
+        maxLength={50}
+        autoFocus
+      />
+    );
+  }
+
+  return (
+    <button
+      className="text-xs font-bold hover:underline decoration-dashed underline-offset-2 cursor-pointer text-left"
+      onClick={() => setEditing(true)}
+      title="点击修改名称"
+    >
+      {passkey.name || passkey.id.slice(0, 12) + "..."}
+    </button>
+  );
+}
+
 function PasskeySection() {
   const [passkeys, setPasskeys] = useState<any[]>([]);
   const [adding, setAdding] = useState(false);
@@ -373,8 +430,6 @@ function PasskeySection() {
       setShowXiaomiGuide(true);
       return;
     }
-    const name = window.prompt("为此通行密钥命名（如：工作电脑、iPhone）", "Passkey");
-    if (name === null) return; // user cancelled
     setAdding(true);
     setError("");
     setSuccess("");
@@ -401,10 +456,9 @@ function PasskeySection() {
             clientDataJSON: bufferToBase64url(response.clientDataJSON),
           },
         }),
-        name || "Passkey",
       );
       await load();
-      setSuccess("通行密钥注册成功！建议立即退出并尝试使用通行密钥登录，以确认可正常使用。");
+      setSuccess("通行密钥注册成功！点击名称可修改。建议退出后尝试使用通行密钥登录以确认可用。");
     } catch (err: any) {
       if (err.name !== "NotAllowedError") setError(err.message || "Passkey 注册失败");
     }
@@ -485,50 +539,34 @@ function PasskeySection() {
                     <Smartphone className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-xs font-bold">{pk.name || pk.id.slice(0, 12) + "..."}</p>
+                    <PasskeyNameEditor
+                      passkey={pk}
+                      onSave={() => { setSuccess(""); load(); }}
+                      onError={(msg) => setError(msg)}
+                    />
                     <p className="text-[10px] text-muted-foreground flex items-center gap-1.5 uppercase font-medium">
                       <Clock className="h-2.5 w-2.5" />{" "}
                       {new Date(pk.created_at * 1000).toLocaleDateString()} 绑定
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={async () => {
-                      const newName = window.prompt("重命名通行密钥", pk.name || "")?.trim();
-                      if (!newName) return;
-                      setSuccess("");
-                      try {
-                        await api.renamePasskey(pk.id, newName);
-                        load();
-                      } catch (e: any) {
-                        setError(e.message || "重命名失败");
-                      }
-                    }}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={async () => {
-                      if (!confirm("确定要删除此 Passkey 吗？")) return;
-                      setSuccess("");
-                      try {
-                        await api.deletePasskey(pk.id);
-                        load();
-                      } catch (e: any) {
-                        setError(e.message || "删除失败");
-                      }
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                  onClick={async () => {
+                    if (!confirm("确定要删除此 Passkey 吗？")) return;
+                    setSuccess("");
+                    try {
+                      await api.deletePasskey(pk.id);
+                      load();
+                    } catch (e: any) {
+                      setError(e.message || "删除失败");
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
               </div>
             ))}
           </div>
