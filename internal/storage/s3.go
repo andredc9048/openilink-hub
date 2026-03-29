@@ -27,7 +27,7 @@ type S3Config struct {
 	PublicURL string
 }
 
-// NewS3(cfg) creates a new S3Store and ensures the bucket exists.
+// NewS3 creates a new S3Store and ensures the bucket exists.
 func NewS3(cfg S3Config) (*S3Store, error) {
 	client, err := minio.New(cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
@@ -69,10 +69,14 @@ func (s *S3Store) Put(ctx context.Context, key, contentType string, data []byte)
 func (s *S3Store) Get(ctx context.Context, key string) ([]byte, error) {
 	obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("storage: s3 get %s: %w", key, err)
 	}
 	defer obj.Close()
-	return io.ReadAll(obj)
+	data, err := io.ReadAll(obj)
+	if err != nil {
+		return nil, fmt.Errorf("storage: s3 read %s: %w", key, err)
+	}
+	return data, nil
 }
 
 func (s *S3Store) URL(key string) string {

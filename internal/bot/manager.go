@@ -713,8 +713,8 @@ func (m *Manager) processMedia(inst *Instance, msg *provider.InboundMessage) map
 			}
 		} else {
 			// Fallback: proxy URL via Hub (no storage configured)
-			item.Media.URL = fmt.Sprintf("%s/api/v1/channels/media?eqp=%s&aes=%s&ct=%s",
-				m.baseURL, item.Media.EncryptQueryParam, item.Media.AESKey,
+			item.Media.URL = fmt.Sprintf("%s/api/v1/channels/media?bot=%s&eqp=%s&aes=%s&ct=%s",
+				m.baseURL, inst.DBID, item.Media.EncryptQueryParam, item.Media.AESKey,
 				mediaContentType(item.Type))
 		}
 	}

@@ -71,3 +71,36 @@ func TestFSStoreNestedDirs(t *testing.T) {
 		t.Fatalf("unexpected: %s", got)
 	}
 }
+
+func TestFSStorePathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFS(dir, "/api/v1/media")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	malicious := []string{
+		"../../etc/passwd",
+		"../../../etc/shadow",
+		"bot1/../../etc/passwd",
+		"bot1/../../../etc/passwd",
+		"/etc/passwd",
+		"bot1/2026/../../../../../../etc/passwd",
+	}
+
+	for _, key := range malicious {
+		t.Run("Put_"+key, func(t *testing.T) {
+			_, err := fs.Put(ctx, key, "text/plain", []byte("hack"))
+			if err == nil {
+				t.Fatalf("expected path traversal rejection for key %q", key)
+			}
+		})
+		t.Run("Get_"+key, func(t *testing.T) {
+			_, err := fs.Get(ctx, key)
+			if err == nil {
+				t.Fatalf("expected path traversal rejection for key %q", key)
+			}
+		})
+	}
+}

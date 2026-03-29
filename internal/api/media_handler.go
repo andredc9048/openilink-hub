@@ -8,10 +8,13 @@ import (
 	"github.com/openilink/openilink-hub/internal/bot"
 )
 
-// GET /api/v1/channels/media?eqp=xxx&aes=xxx
-// Legacy proxy: downloads from CDN via bot provider, decrypts and streams back.
-// Kept for backward compatibility with existing media URLs stored before local FS storage.
-// Auth: channel API key OR session cookie (any connected bot owned by user).
+// GET /api/v1/channels/media?bot=xxx&eqp=xxx&aes=xxx
+// CDN proxy: downloads from provider CDN via bot, decrypts and streams back.
+// Used when no storage backend (S3/FS) is configured.
+//
+// Auth:
+//   - Channel API key (?key=xxx): channel must belong to the bot
+//   - Session cookie + bot query param: user must own the bot
 func (s *Server) handleChannelMedia(w http.ResponseWriter, r *http.Request) {
 	eqp := r.URL.Query().Get("eqp")
 	aes := r.URL.Query().Get("aes")
@@ -20,7 +23,7 @@ func (s *Server) handleChannelMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try channel API key auth first
+	// Auth path 1: channel API key
 	if ch, _ := s.authenticateChannel(r); ch != nil {
 		inst, ok := s.BotManager.GetInstance(ch.BotID)
 		if !ok {
@@ -31,19 +34,25 @@ func (s *Server) handleChannelMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try session cookie auth: find a connected bot owned by this user
+	// Auth path 2: session cookie + explicit bot ID
+	botID := r.URL.Query().Get("bot")
+	if botID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	if cookie, err := r.Cookie("session"); err == nil {
 		if uid, err := auth.ValidateSession(s.Store, cookie.Value); err == nil && uid != "" {
-			bots, _ := s.Store.ListBotsByUser(uid)
-			for _, b := range bots {
-				inst, ok := s.BotManager.GetInstance(b.ID)
-				if !ok {
-					continue
-				}
-				s.serveChannelMedia(w, r, inst, eqp, aes)
+			b, err := s.Store.GetBot(botID)
+			if err != nil || b.UserID != uid {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			http.Error(w, "no connected bot", http.StatusServiceUnavailable)
+			inst, ok := s.BotManager.GetInstance(botID)
+			if !ok {
+				http.Error(w, "bot not connected", http.StatusServiceUnavailable)
+				return
+			}
+			s.serveChannelMedia(w, r, inst, eqp, aes)
 			return
 		}
 	}
