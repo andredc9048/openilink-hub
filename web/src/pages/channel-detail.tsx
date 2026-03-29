@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
 import {
   ArrowLeft,
@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, botDisplayName } from "../lib/api";
+import { useBot, useBotChannels, useWebhookLogs } from "@/hooks/use-bots";
 import {
   Table,
   TableBody,
@@ -55,27 +56,17 @@ export function ChannelDetailPage() {
   const location = useLocation();
   const { toast } = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
-  const [channel, setChannel] = useState<any>(null);
-  const [bot, setBot] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
 
   const activeTab = location.pathname.split("/").pop() || "overview";
 
-  const load = useCallback(async () => {
-    try {
-      const [bots, chs] = await Promise.all([api.listBots(), api.listChannels(botId!)]);
-      setBot((bots || []).find((b: any) => b.id === botId));
-      setChannel((chs || []).find((c: any) => c.id === channelId) || null);
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "加载失败", description: e.message });
-    } finally {
-      setLoading(false);
-    }
-  }, [botId, channelId, toast]);
+  const { data: bot, isLoading: botLoading } = useBot(botId || "");
+  const { data: channels, isLoading: channelsLoading, refetch: refetchChannels } = useBotChannels(botId || "");
+  const channel = (channels || []).find((c: any) => c.id === channelId) || null;
+  const loading = botLoading || channelsLoading;
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  function load() {
+    refetchChannels();
+  }
 
   async function handleDelete() {
     const ok = await confirm({
@@ -720,23 +711,14 @@ function FilterTab({
 }
 
 function WebhookLogsTab({ channel, botId }: { channel: any; botId: string }) {
-  const [logs, setLogs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  async function load() {
-    try {
-      const data = await api.webhookLogs(botId, channel.id, 50);
-      setLogs(data || []);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const { data: logs = [], isLoading: loading, refetch } = useWebhookLogs(botId, channel.id);
 
   useEffect(() => {
-    load();
-    const t = setInterval(load, 5000);
+    const t = setInterval(() => refetch(), 5000);
     return () => clearInterval(t);
-  }, [botId, channel.id]);
+  }, [botId, channel.id, refetch]);
+
+  function load() { refetch(); }
 
   return (
     <div className="space-y-4">
