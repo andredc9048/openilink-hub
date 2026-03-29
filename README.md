@@ -74,11 +74,7 @@ flowchart TD
     end
     B --> C
 
-    C --> D[App: Lark 飞书]
-    C --> D2[App: Slack]
-    C --> D3[App: Discord]
-    C --> D4[App: DingTalk 钉钉]
-    C --> D5[App: WeCom 企业微信]
+    C --> D[App: 平台互通<br/>飞书 / Slack / Discord / 钉钉 / 企业微信]
     C --> E[App: Command Service]
     C --> F[App: OpenClaw]
     C --> G[自定义 App]
@@ -86,11 +82,7 @@ flowchart TD
     C --> I[Webhook 转发]
     C --> J[AI 自动回复]
 
-    D --> K[飞书群聊 / 飞书 AI]
-    D2 --> K2[Slack Workspace]
-    D3 --> K3[Discord Server]
-    D4 --> K4[钉钉群聊]
-    D5 --> K5[企业微信]
+    D --> K[第三方平台<br/>消息互通 + AI Tools]
     E --> L[股票查询 / 图片生成 / AI 对话]
     F --> M[AI Agent Gateway]
     G --> N[你的业务系统]
