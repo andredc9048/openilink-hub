@@ -6,6 +6,8 @@ import { Dialog, DialogContent } from "../components/ui/dialog";
 import { api } from "../lib/api";
 import { Blocks, Trash2, X, Pencil } from "lucide-react";
 import { useConfirm, usePrompt } from "@/components/ui/confirm-dialog";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query-keys";
 import {
   useAdminApps,
   useSetAppListing,
@@ -14,6 +16,7 @@ import {
 } from "@/hooks/use-admin";
 
 export function AdminAppsTab() {
+  const queryClient = useQueryClient();
   const { data: apps = [] } = useAdminApps();
   const [selected, setSelected] = useState<any>(null);
   const [editing, setEditing] = useState(false);
@@ -177,6 +180,7 @@ export function AdminAppsTab() {
                 onSave={() => {
                   setEditing(false);
                   setSelected(null);
+                  queryClient.invalidateQueries({ queryKey: queryKeys.admin.apps() });
                 }}
                 onCancel={() => setEditing(false)}
               />
@@ -186,11 +190,14 @@ export function AdminAppsTab() {
                 onEdit={() => setEditing(true)}
                 onDelete={() => handleDelete(selected)}
                 onClose={() => setSelected(null)}
-                onToggleListing={() => {
+                onToggleListing={async () => {
                   const newListing = selected.listing === "listed" ? "unlisted" : "listed";
-                  setListingMutation.mutateAsync({ id: selected.id, listing: newListing }).then(() => {
+                  try {
+                    await setListingMutation.mutateAsync({ id: selected.id, listing: newListing });
                     setSelected({ ...selected, listing: newListing });
-                  });
+                  } catch {
+                    // mutation error handled by react-query
+                  }
                 }}
               />
             )

@@ -27,8 +27,12 @@ export function AdminUsersPage() {
   const { confirm, ConfirmDialog } = useConfirm();
 
   async function handleUpdateStatus(id: string, status: string) {
-    await updateStatusMutation.mutateAsync({ id, status });
-    toast({ title: "状态已更新" });
+    try {
+      await updateStatusMutation.mutateAsync({ id, status });
+      toast({ title: "状态已更新" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "操作失败", description: e.message });
+    }
   }
 
   return (
@@ -113,7 +117,12 @@ export function AdminUsersPage() {
                                 variant: "destructive",
                               });
                               if (ok) {
-                                await deleteUserMutation.mutateAsync(u.id);
+                                try {
+                                  await deleteUserMutation.mutateAsync(u.id);
+                                  toast({ title: "已删除用户" });
+                                } catch (e: any) {
+                                  toast({ variant: "destructive", title: "删除失败", description: e.message });
+                                }
                               }
                             }}
                           >

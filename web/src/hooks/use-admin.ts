@@ -71,13 +71,7 @@ export function useRegistryConfig() {
 export function useRegistrationConfig() {
   return useQuery({
     queryKey: queryKeys.admin.registrationConfig(),
-    queryFn: async () => {
-      try {
-        return await api.getRegistrationConfig();
-      } catch {
-        return { enabled: "true" };
-      }
-    },
+    queryFn: () => api.getRegistrationConfig(),
     staleTime: 60_000,
   });
 }
@@ -123,7 +117,10 @@ export function useReviewListing() {
   return useMutation({
     mutationFn: ({ appId, approve, reason }: { appId: string; approve: boolean; reason?: string }) =>
       api.reviewListing(appId, approve, reason),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.admin.apps() }),
+    onSuccess: (_data, { appId }) => {
+      qc.invalidateQueries({ queryKey: queryKeys.admin.apps() });
+      qc.invalidateQueries({ queryKey: queryKeys.apps.reviews(appId) });
+    },
   });
 }
 

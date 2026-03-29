@@ -63,7 +63,8 @@ const TABS: { key: TabFilter; label: string }[] = [
 
 export function AdminReviewsPage() {
   const { data: apps = [], isLoading: loading } = useAdminApps();
-  const [selected, setSelected] = useState<any>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = selectedId ? apps.find((a: any) => a.id === selectedId) ?? null : null;
   const [rejectTarget, setRejectTarget] = useState<any>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [tab, setTab] = useState<TabFilter>("pending");
@@ -93,7 +94,7 @@ export function AdminReviewsPage() {
       toast({ title: `「${rejectTarget.name}」已拒绝` });
       setRejectTarget(null);
       setRejectReason("");
-      setSelected(null);
+      setSelectedId(null);
     } catch (e: any) {
       toast({ variant: "destructive", title: "操作失败", description: e.message });
     }
@@ -151,7 +152,7 @@ export function AdminReviewsPage() {
           if (next >= 0) {
             e.preventDefault();
             setTab(keys[next]);
-            setSelected(null);
+            setSelectedId(null);
             tabListRef.current?.querySelectorAll<HTMLButtonElement>("[role=tab]")[next]?.focus();
           }
         }}
@@ -164,7 +165,7 @@ export function AdminReviewsPage() {
             aria-selected={tab === key}
             aria-controls="review-tabpanel"
             tabIndex={tab === key ? 0 : -1}
-            onClick={() => { setTab(key); setSelected(null); }}
+            onClick={() => { setTab(key); setSelectedId(null); }}
             className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition-all ${
               tab === key
                 ? "bg-background text-foreground shadow-sm"
@@ -210,7 +211,7 @@ export function AdminReviewsPage() {
             sorted.map((a: any) => (
               <button
                 key={a.id}
-                onClick={() => setSelected(a)}
+                onClick={() => setSelectedId(a.id)}
                 aria-current={selected?.id === a.id ? "true" : undefined}
                 className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                   selected?.id === a.id

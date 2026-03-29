@@ -102,6 +102,7 @@ export function AdminOverviewPage() {
   }, [effectiveAIConfig?.available_models]);
 
   async function handleSaveAI() {
+    if (!effectiveAIConfig) return;
     try {
       await saveAIMutation.mutateAsync(effectiveAIConfig);
       toast({ title: "全局 AI 配置已保存" });
