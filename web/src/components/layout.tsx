@@ -2,6 +2,7 @@ import { Outlet, useNavigate, Link, useLocation } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { useUser } from "@/hooks/use-auth";
 import { useBots } from "@/hooks/use-bots";
+import { useAuthStore } from "@/stores/auth-store";
 import logoBlack from "@/assets/logo-black.svg";
 import logoWhite from "@/assets/logo-white.svg";
 import iconBlack from "@/assets/icon-black.svg";
@@ -271,7 +272,7 @@ export function Layout() {
 
   useEffect(() => {
     if (isError) navigate("/login", { replace: true });
-  }, [isError]);
+  }, [isError, navigate]);
 
   if (!user) return null;
 
@@ -487,7 +488,7 @@ export function Layout() {
                 >
                   <DropdownMenuItem
                     onClick={async () => {
-                      await api.logout();
+                      await useAuthStore.getState().logout();
                       navigate("/login");
                     }}
                     className="cursor-pointer font-medium text-destructive focus:bg-destructive/10 focus:text-destructive"

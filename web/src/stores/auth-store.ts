@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
+import { queryClient } from "@/lib/query-client";
 
 interface User {
   id: string;
@@ -24,7 +25,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   setUser: (user) => set({ user }),
   clearUser: () => set({ user: null }),
   logout: async () => {
-    await api.logout();
-    set({ user: null });
+    try {
+      await api.logout();
+    } finally {
+      set({ user: null });
+      queryClient.clear();
+    }
   },
 }));
