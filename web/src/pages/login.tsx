@@ -16,6 +16,8 @@ import {
 import { Input } from "../components/ui/input";
 import { api } from "../lib/api";
 import { Separator } from "../components/ui/separator";
+import { useOAuthProviders } from "@/hooks/use-settings";
+import { useInfo } from "@/hooks/use-auth";
 import {
   Collapsible,
   CollapsibleContent,
@@ -52,21 +54,17 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
 
   // OAuth
-  const [oauthProviders, setOauthProviders] = useState<Array<{ name: string; display_name: string; type: string; key?: string }>>([]);
+  const { data: oauthProviders = [] } = useOAuthProviders();
 
   // Registration enabled flag (from /api/info)
-  const [registrationEnabled, setRegistrationEnabled] = useState(true);
+  const { data: infoData } = useInfo();
+  const registrationEnabled = infoData?.registration_enabled !== false;
 
   useEffect(() => {
-    api.oauthProviders().then((data) => setOauthProviders(data.providers)).catch(() => {});
-    api.info().then((data) => {
-      if (data.registration_enabled === false) {
-        setRegistrationEnabled(false);
-        // If user was in register mode, switch back to login
-        setMode("login");
-      }
-    }).catch(() => {});
-  }, []);
+    if (infoData?.registration_enabled === false) {
+      setMode("login");
+    }
+  }, [infoData]);
 
   // Auto-start scan login on mount
   useEffect(() => {
