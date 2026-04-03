@@ -18,7 +18,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { Label } from "../components/ui/label";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, botDisplayName } from "../lib/api";
-import { useApp } from "@/hooks/use-apps";
+import { invalidateAllAppQueries, useApp } from "@/hooks/use-apps";
 import { useBots } from "@/hooks/use-bots";
 import { useToast } from "@/hooks/use-toast";
 import { queryKeys } from "@/lib/query-keys";
@@ -34,13 +34,7 @@ export function InstallAppPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const qc = useQueryClient();
-  const invalidateAppQueries = () => {
-    qc.invalidateQueries({ queryKey: queryKeys.bots.apps(botId!) });
-    qc.invalidateQueries({ queryKey: queryKeys.bots.all() });
-    qc.invalidateQueries({ queryKey: queryKeys.marketplace.apps() });
-    qc.invalidateQueries({ queryKey: queryKeys.marketplace.builtin() });
-    qc.invalidateQueries({ queryKey: queryKeys.apps.all({ listing: "listed" }) });
-  };
+  const invalidateAppQueries = () => invalidateAllAppQueries(qc, botId);
   const { data: app, isLoading: appLoading } = useApp(appId!);
   const { data: allBots = [] } = useBots();
   const bot = allBots.find((b: any) => b.id === botId);
@@ -144,7 +138,11 @@ export function InstallAppPage() {
       invalidateAppQueries();
       navigate(`/dashboard/accounts/${botId}/apps/${installationId}`);
     } catch (e: any) {
-      toast({ variant: "destructive", title: "安装失败", description: e.message });
+      const description =
+        e.message === "HTTP 403" && app?.homepage
+          ? `远端应用返回了 403。请先检查该应用的接入配置，或前往应用主页联系开发者：${app.homepage}`
+          : e.message;
+      toast({ variant: "destructive", title: "安装失败", description });
     } finally {
       setInstalling(false);
     }

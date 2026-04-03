@@ -1,6 +1,18 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, QueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+
+/** Invalidate all app-related queries after install/uninstall/create/delete/delist operations. */
+export function invalidateAllAppQueries(qc: QueryClient, botId?: string) {
+  qc.invalidateQueries({ queryKey: ["apps"] });
+  qc.invalidateQueries({ queryKey: queryKeys.marketplace.apps() });
+  qc.invalidateQueries({ queryKey: queryKeys.marketplace.builtin() });
+  qc.invalidateQueries({ queryKey: queryKeys.apps.all({ listing: "listed" }) });
+  qc.invalidateQueries({ queryKey: queryKeys.bots.all() });
+  if (botId) {
+    qc.invalidateQueries({ queryKey: queryKeys.bots.apps(botId) });
+  }
+}
 
 export function useApps(opts?: { listing?: string }) {
   return useQuery({
@@ -46,7 +58,7 @@ export function useCreateApp() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: any) => api.createApp(data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["apps"] }),
+    onSuccess: () => invalidateAllAppQueries(qc),
   });
 }
 
@@ -54,7 +66,7 @@ export function useDeleteApp() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.deleteApp(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["apps"] }),
+    onSuccess: () => invalidateAllAppQueries(qc),
   });
 }
 
@@ -64,13 +76,7 @@ export function useInstallApp() {
     mutationFn: ({ appId, data }: { appId: string; data: any }) => api.installApp(appId, data),
     onSuccess: (_data, { appId, data }) => {
       qc.invalidateQueries({ queryKey: queryKeys.apps.installations(appId) });
-      qc.invalidateQueries({ queryKey: queryKeys.bots.all() });
-      if (data?.bot_id) {
-        qc.invalidateQueries({ queryKey: queryKeys.bots.apps(data.bot_id) });
-      }
-      qc.invalidateQueries({ queryKey: queryKeys.marketplace.apps() });
-      qc.invalidateQueries({ queryKey: queryKeys.marketplace.builtin() });
-      qc.invalidateQueries({ queryKey: queryKeys.apps.all({ listing: "listed" }) });
+      invalidateAllAppQueries(qc, data?.bot_id);
     },
   });
 }
@@ -82,10 +88,7 @@ export function useUninstallApp() {
       api.deleteInstallation(appId, instId),
     onSuccess: (_data, { appId }) => {
       qc.invalidateQueries({ queryKey: queryKeys.apps.installations(appId) });
-      qc.invalidateQueries({ queryKey: queryKeys.bots.all() });
-      qc.invalidateQueries({ queryKey: queryKeys.marketplace.apps() });
-      qc.invalidateQueries({ queryKey: queryKeys.marketplace.builtin() });
-      qc.invalidateQueries({ queryKey: queryKeys.apps.all({ listing: "listed" }) });
+      invalidateAllAppQueries(qc);
     },
   });
 }

@@ -70,12 +70,35 @@ type AppInstallation struct {
 type AppReview struct {
 	ID        string `json:"id"`
 	AppID     string `json:"app_id"`
-	Action    string `json:"action"`    // request, approve, reject, withdraw, auto_revert, admin_set
+	Action    string `json:"action"` // request, approve, reject, withdraw, auto_revert, admin_set
 	ActorID   string `json:"actor_id"`
 	Reason    string `json:"reason"`
 	Version   string `json:"version"`
 	Snapshot  string `json:"snapshot"`
 	CreatedAt int64  `json:"created_at"`
+}
+
+type AppUpdate struct {
+	Name             string
+	Description      string
+	Icon             string
+	IconURL          string
+	Homepage         string
+	OAuthSetupURL    string
+	OAuthRedirectURL string
+	WebhookURL       string
+	ConfigSchema     string
+	Version          string
+	Readme           string
+	Guide            string
+	Tools            json.RawMessage
+	Events           json.RawMessage
+	Scopes           json.RawMessage
+}
+
+type AppUpdateResult struct {
+	Listing      string
+	Transitioned bool
 }
 
 type AppStore interface {
@@ -87,6 +110,7 @@ type AppStore interface {
 	ListAllApps() ([]App, error)
 	ListMarketplaceApps() ([]App, error)
 	UpdateApp(id string, name, description, icon, iconURL, homepage, oauthSetupURL, oauthRedirectURL, configSchema, version, readme, guide string, tools, events, scopes json.RawMessage) error
+	UpdateAppWithTransition(id string, update AppUpdate, nextListing string) (AppUpdateResult, error)
 	UpdateMarketplaceApp(id, name, description, iconURL, homepage, webhookURL, oauthSetupURL, oauthRedirectURL, version, readme, guide string, tools, events, scopes json.RawMessage) error
 	DeleteApp(id string) error
 	InstallApp(appID, botID string) (*AppInstallation, error)
@@ -101,6 +125,8 @@ type AppStore interface {
 	RegenerateInstallationToken(id string) (string, error)
 	GetInstallationByHandle(botID, handle string) (*AppInstallation, error)
 	DeleteInstallation(id string) error
+	DeleteInstallationsByAppID(appID string) error
+	TransitionListingWithCleanup(id, nextListing, rejectReason string) error
 	CreateOAuthCode(code, appID, botID, state, codeChallenge string) error
 	ExchangeOAuthCode(code string) (appID, botID, codeChallenge string, err error)
 	CleanExpiredOAuthCodes()

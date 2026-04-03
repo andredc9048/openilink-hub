@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { invalidateAllAppQueries } from "@/hooks/use-apps";
 
 // ── Queries ──────────────────────────────────────────────
 
@@ -108,7 +109,10 @@ export function useSetAppListing() {
   return useMutation({
     mutationFn: ({ id, listing }: { id: string; listing: string }) =>
       api.setAppListing(id, listing),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.admin.apps() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.admin.apps() });
+      invalidateAllAppQueries(qc);
+    },
   });
 }
 
@@ -120,6 +124,7 @@ export function useReviewListing() {
     onSuccess: (_data, { appId }) => {
       qc.invalidateQueries({ queryKey: queryKeys.admin.apps() });
       qc.invalidateQueries({ queryKey: queryKeys.apps.reviews(appId) });
+      invalidateAllAppQueries(qc);
     },
   });
 }
@@ -128,7 +133,10 @@ export function useDeleteAdminApp() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.deleteApp(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.admin.apps() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.admin.apps() });
+      invalidateAllAppQueries(qc);
+    },
   });
 }
 

@@ -19,6 +19,7 @@ import {
   ChevronRight,
   ShieldCheck,
   Zap,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -45,8 +46,9 @@ import { Label } from "../components/ui/label";
 import { api, botDisplayName } from "../lib/api";
 import { useBotApps, useBots } from "@/hooks/use-bots";
 import { useApp } from "@/hooks/use-apps";
-import { useQueryClient } from "@tanstack/react-query";
+import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query-keys";
+import { invalidateAllAppQueries } from "@/hooks/use-apps";
 import { SCOPE_DESCRIPTIONS, EVENT_TYPES } from "../lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { AppIcon } from "../components/app-icon";
@@ -217,6 +219,17 @@ export function InstallationDetailPage() {
                   内置应用
                 </Badge>
               ) : null}
+              {app.homepage && app.registry ? (
+                <a
+                  href={app.homepage}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  应用主页
+                </a>
+              ) : null}
               <div className="flex items-center gap-2">
                 <Switch
                   checked={enabled}
@@ -314,10 +327,16 @@ export function InstallationDetailPage() {
             <ConfigSection
               inst={inst}
               onUninstall={() => navigate(`/dashboard/accounts/${botId}`)}
+              queryClient={queryClient}
             />
           )}
           {section === "event-logs" && (
-            <EventLogsSection appId={inst.app_id} instId={inst.id} botId={botId!} />
+            <EventLogsSection
+              appId={inst.app_id}
+              instId={inst.id}
+              botId={botId!}
+              homepage={app.homepage}
+            />
           )}
           {section === "api-logs" && <ApiLogsSection appId={inst.app_id} instId={inst.id} />}
         </div>
@@ -725,7 +744,7 @@ function AppConfigForm({ app, inst, onUpdate }: { app: any; inst: any; onUpdate:
 
 // ==================== Config Section ====================
 
-function ConfigSection({ inst, onUninstall }: { inst: any; onUninstall: () => void }) {
+function ConfigSection({ inst, onUninstall, queryClient }: { inst: any; onUninstall: () => void; queryClient: QueryClient }) {
   const { toast } = useToast();
   const [showUninstallDialog, setShowUninstallDialog] = useState(false);
   const [uninstalling, setUninstalling] = useState(false);
@@ -735,6 +754,7 @@ function ConfigSection({ inst, onUninstall }: { inst: any; onUninstall: () => vo
     try {
       await api.deleteInstallation(inst.app_id, inst.id);
       toast({ title: "已卸载" });
+      invalidateAllAppQueries(queryClient, inst.bot_id);
       onUninstall();
     } catch (e: any) {
       toast({ variant: "destructive", title: "卸载失败", description: e.message });
@@ -792,10 +812,12 @@ function EventLogsSection({
   appId,
   instId,
   botId,
+  homepage,
 }: {
   appId: string;
   instId: string;
   botId: string;
+  homepage?: string;
 }) {
   const navigate = useNavigate();
   const [logs, setLogs] = useState<any[]>([]);
@@ -845,6 +867,28 @@ function EventLogsSection({
           刷新
         </Button>
       </div>
+
+      {/* Show hint when logs contain 403/4xx errors */}
+      {!loading && logs.some((l) => {
+        const code = l.status_code || l.status;
+        return code >= 400 && code < 500;
+      }) && (
+        <div className="rounded-lg border border-orange-200 bg-orange-50 dark:border-orange-900 dark:bg-orange-950/30 p-3 text-xs text-muted-foreground space-y-1">
+          <p className="font-medium text-orange-700 dark:text-orange-400">部分事件投递失败</p>
+          <p>如果应用来自远程市场，4xx 错误通常是远程应用服务器的配置问题。请联系应用开发者确认 Webhook 地址和权限配置是否正确。</p>
+          {homepage ? (
+            <a
+              href={homepage}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-orange-700 hover:underline dark:text-orange-400"
+            >
+              <ExternalLink className="h-3 w-3" />
+              前往应用主页
+            </a>
+          ) : null}
+        </div>
+      )}
 
       <Card className="overflow-hidden">
         {loading ? (

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/openilink/openilink-hub/internal/auth"
@@ -63,6 +65,102 @@ func buildListingSnapshot(app *store.App) string {
 	return string(b)
 }
 
+func normalizeJSON(raw json.RawMessage) json.RawMessage {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return bytes.TrimSpace(raw)
+	}
+	normalized, err := json.Marshal(normalizeJSONValue(v))
+	if err != nil {
+		return bytes.TrimSpace(raw)
+	}
+	return normalized
+}
+
+func jsonRawEqual(a, b json.RawMessage) bool {
+	return bytes.Equal(normalizeJSON(a), normalizeJSON(b))
+}
+
+func normalizeJSONValue(v any) any {
+	switch value := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(value))
+		for key, item := range value {
+			out[key] = normalizeJSONValue(item)
+		}
+		return out
+	case []any:
+		if len(value) == 0 {
+			return []any{}
+		}
+		if values, ok := normalizeStringSet(value); ok {
+			return values
+		}
+		out := make([]any, len(value))
+		for i, item := range value {
+			out[i] = normalizeJSONValue(item)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func normalizeStringSet(items []any) ([]string, bool) {
+	values := make([]string, 0, len(items))
+	for _, item := range items {
+		s, ok := item.(string)
+		if !ok {
+			return nil, false
+		}
+		values = append(values, s)
+	}
+	sort.Strings(values)
+	out := values[:0]
+	for _, value := range values {
+		if len(out) > 0 && out[len(out)-1] == value {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out, true
+}
+
+func normalizeCollectionJSON(raw json.RawMessage) json.RawMessage {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return []byte("[]")
+	}
+
+	var v any
+	if err := json.Unmarshal(trimmed, &v); err != nil {
+		return trimmed
+	}
+	if v == nil {
+		return []byte("[]")
+	}
+	normalized, err := json.Marshal(normalizeJSONValue(v))
+	if err != nil {
+		return trimmed
+	}
+	return normalized
+}
+
+func jsonCollectionEqual(a, b json.RawMessage) bool {
+	return bytes.Equal(normalizeCollectionJSON(a), normalizeCollectionJSON(b))
+}
+
+func (s *Server) transitionAppAwayFromListed(appID, nextListing string) error {
+	if err := s.Store.TransitionListingWithCleanup(appID, nextListing, ""); err != nil {
+		slog.Error("failed to transition app listing with cleanup", "app_id", appID, "to", nextListing, "err", err)
+		return err
+	}
+	return nil
+}
+
 // POST /api/apps
 func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
@@ -82,7 +180,7 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		Version          string          `json:"version"`
 		Readme           string          `json:"readme"`
 		Guide            string          `json:"guide"`
-		ConfigSchema     string `json:"config_schema"`
+		ConfigSchema     string          `json:"config_schema"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid request", http.StatusBadRequest)
@@ -331,61 +429,70 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		scopes = req.Scopes
 	}
 
-	if err := s.Store.UpdateApp(appID, name, description, icon, iconURL, homepage, oauthSetupURL, oauthRedirectURL, configSchema, version, readme, guide, tools, events, scopes); err != nil {
+	webhookURL := app.WebhookURL
+	if req.WebhookURL != nil {
+		webhookURL = *req.WebhookURL
+	}
+
+	coreChanged := false
+	if req.WebhookURL != nil && *req.WebhookURL != app.WebhookURL {
+		coreChanged = true
+	}
+	if req.Tools != nil && !jsonCollectionEqual(req.Tools, app.Tools) {
+		coreChanged = true
+	}
+	if req.Events != nil && !jsonCollectionEqual(req.Events, app.Events) {
+		coreChanged = true
+	}
+	if req.Scopes != nil && !jsonCollectionEqual(req.Scopes, app.Scopes) {
+		coreChanged = true
+	}
+	if req.ConfigSchema != nil && !jsonRawEqual(json.RawMessage(*req.ConfigSchema), json.RawMessage(app.ConfigSchema)) {
+		coreChanged = true
+	}
+	if req.Version != nil && *req.Version != app.Version {
+		coreChanged = true
+	}
+
+	nextListing := ""
+	if app.Listing == "listed" && coreChanged {
+		nextListing = "pending"
+	}
+
+	result, err := s.Store.UpdateAppWithTransition(appID, store.AppUpdate{
+		Name:             name,
+		Description:      description,
+		Icon:             icon,
+		IconURL:          iconURL,
+		Homepage:         homepage,
+		OAuthSetupURL:    oauthSetupURL,
+		OAuthRedirectURL: oauthRedirectURL,
+		WebhookURL:       webhookURL,
+		ConfigSchema:     configSchema,
+		Version:          version,
+		Readme:           readme,
+		Guide:            guide,
+		Tools:            tools,
+		Events:           events,
+		Scopes:           scopes,
+	}, nextListing)
+	if err != nil {
 		jsonError(w, "update failed", http.StatusInternalServerError)
 		return
 	}
 
-	// TODO: webhook_url update is non-atomic with UpdateApp above. If this fails,
-	// the DB is partially updated. Consider merging webhook_url into UpdateApp
-	// or wrapping both in a transaction.
-	if req.WebhookURL != nil && *req.WebhookURL != app.WebhookURL {
-		if err := s.Store.UpdateAppWebhookURL(appID, *req.WebhookURL); err != nil {
-			jsonError(w, "update webhook_url failed", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	// Auto-revert listed apps to pending when core fields change.
-	if app.Listing == "listed" {
-		coreChanged := false
-		if req.WebhookURL != nil && *req.WebhookURL != app.WebhookURL {
-			coreChanged = true
-		}
-		if req.Tools != nil {
-			coreChanged = true
-		}
-		if req.Events != nil {
-			coreChanged = true
-		}
-		if req.Scopes != nil {
-			coreChanged = true
-		}
-		if req.ConfigSchema != nil && *req.ConfigSchema != app.ConfigSchema {
-			coreChanged = true
-		}
-		if req.Version != nil && *req.Version != app.Version {
-			coreChanged = true
-		}
-
-		if coreChanged {
-			if err := s.Store.SetListing(appID, "pending"); err != nil {
-				slog.Error("failed to revert listing to pending", "app", appID, "err", err)
-				jsonError(w, "failed to revert listing", http.StatusInternalServerError)
-				return
-			}
-			slog.Info("listed app core fields changed, reverted to pending", "app", appID)
-			updatedApp, _ := s.Store.GetApp(appID)
-			if updatedApp != nil {
-				if err := s.Store.CreateAppReview(&store.AppReview{
-					AppID:    appID,
-					Action:   "auto_revert",
-					ActorID:  "system",
-					Version:  updatedApp.Version,
-					Snapshot: buildListingSnapshot(updatedApp),
-				}); err != nil {
-					slog.Warn("failed to create app review record", "app", appID, "action", "auto_revert", "err", err)
-				}
+	if result.Transitioned {
+		slog.Info("listed app core fields changed, reverted to pending", "app", appID)
+		updatedApp, _ := s.Store.GetApp(appID)
+		if updatedApp != nil {
+			if err := s.Store.CreateAppReview(&store.AppReview{
+				AppID:    appID,
+				Action:   "auto_revert",
+				ActorID:  "system",
+				Version:  updatedApp.Version,
+				Snapshot: buildListingSnapshot(updatedApp),
+			}); err != nil {
+				slog.Warn("failed to create app review record", "app", appID, "action", "auto_revert", "err", err)
 			}
 		}
 	}
@@ -522,11 +629,21 @@ func (s *Server) handleReviewListing(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "reason required for rejection", http.StatusBadRequest)
 		return
 	}
-	if err := s.Store.ReviewListing(appID, req.Approve, req.Reason); err != nil {
+	app, err := s.Store.GetApp(appID)
+	if err != nil {
+		jsonError(w, "app not found", http.StatusNotFound)
+		return
+	}
+	if req.Approve {
+		err = s.Store.ReviewListing(appID, true, "")
+	} else {
+		err = s.Store.TransitionListingWithCleanup(appID, "rejected", req.Reason)
+	}
+	if err != nil {
 		jsonError(w, "review failed", http.StatusInternalServerError)
 		return
 	}
-	app, _ := s.Store.GetApp(appID)
+	app, _ = s.Store.GetApp(appID)
 	actorID := auth.UserIDFromContext(r.Context())
 	action := "approve"
 	if !req.Approve {
@@ -621,10 +738,6 @@ func (s *Server) requireAppForInstall(w http.ResponseWriter, r *http.Request) *s
 // moderation actions (e.g. emergency takedown, re-listing without re-review).
 func (s *Server) handleAdminSetListing(w http.ResponseWriter, r *http.Request) {
 	appID := r.PathValue("id")
-	if _, err := s.Store.GetApp(appID); err != nil {
-		jsonError(w, "app not found", http.StatusNotFound)
-		return
-	}
 	var req struct {
 		Listing string `json:"listing"`
 	}
@@ -637,13 +750,18 @@ func (s *Server) handleAdminSetListing(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "listing must be 'listed' or 'unlisted'", http.StatusBadRequest)
 		return
 	}
-	if err := s.Store.SetListing(appID, req.Listing); err != nil {
+	app, err := s.Store.GetApp(appID)
+	if err != nil {
+		jsonError(w, "app not found", http.StatusNotFound)
+		return
+	}
+	if err := s.transitionAppAwayFromListed(appID, req.Listing); err != nil {
 		slog.Error("set listing failed", "err", err)
 		jsonError(w, "set listing failed", http.StatusInternalServerError)
 		return
 	}
 	slog.Info("admin set listing", "app_id", appID, "listing", req.Listing)
-	app, _ := s.Store.GetApp(appID)
+	app, _ = s.Store.GetApp(appID)
 	if app != nil {
 		if err := s.Store.CreateAppReview(&store.AppReview{
 			AppID:    appID,

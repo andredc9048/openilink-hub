@@ -44,7 +44,7 @@ export function DeveloperAppsPage() {
       onSuccess: (app: any) => {
         setDialogOpen(false);
         setNewName("");
-        navigate(`/dashboard/apps/${app.id}`);
+        navigate(`/dashboard/developer/apps/${app.id}`);
       },
       onError: (e) => toast({ variant: "destructive", title: "创建失败", description: e.message }),
     });
@@ -100,11 +100,11 @@ export function DeveloperAppsPage() {
               role="button"
               tabIndex={0}
               className="group flex items-center gap-4 px-4 py-3.5 bg-card hover:bg-muted/40 transition-colors cursor-pointer"
-              onClick={() => navigate(`/dashboard/apps/${app.id}`)}
+              onClick={() => navigate(`/dashboard/developer/apps/${app.id}`)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  navigate(`/dashboard/apps/${app.id}`);
+                  navigate(`/dashboard/developer/apps/${app.id}`);
                 }
               }}
             >

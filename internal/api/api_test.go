@@ -11,6 +11,7 @@ import (
 
 	"github.com/openilink/openilink-hub/internal/auth"
 	"github.com/openilink/openilink-hub/internal/config"
+	"github.com/openilink/openilink-hub/internal/registry"
 	"github.com/openilink/openilink-hub/internal/store"
 	"github.com/openilink/openilink-hub/internal/store/sqlite"
 )
@@ -1835,5 +1836,205 @@ func TestSetBotAIModel(t *testing.T) {
 	}
 	if updated.AIModel != "" {
 		t.Errorf("expected AIModel %q, got %q", "", updated.AIModel)
+	}
+}
+
+func TestMarketplaceInstalledStatusIsPerUser(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	user1, err := s.CreateUserFull("user1", "", "User One", "hashed", store.RoleMember)
+	if err != nil {
+		t.Fatalf("CreateUserFull(user1): %v", err)
+	}
+	user2, err := s.CreateUserFull("user2", "", "User Two", "hashed", store.RoleMember)
+	if err != nil {
+		t.Fatalf("CreateUserFull(user2): %v", err)
+	}
+	_ = s.UpdateUserStatus(user1.ID, store.StatusActive)
+	_ = s.UpdateUserStatus(user2.ID, store.StatusActive)
+
+	session1, err := auth.CreateSession(s, user1.ID)
+	if err != nil {
+		t.Fatalf("CreateSession(user1): %v", err)
+	}
+	session2, err := auth.CreateSession(s, user2.ID)
+	if err != nil {
+		t.Fatalf("CreateSession(user2): %v", err)
+	}
+	cookie1 := &http.Cookie{Name: "session", Value: session1}
+	cookie2 := &http.Cookie{Name: "session", Value: session2}
+
+	registryApps := []map[string]any{
+		{
+			"slug":        "remote-app",
+			"name":        "Remote App",
+			"description": "Remote app from registry",
+			"version":     "1.0.0",
+			"author":      "Registry Author",
+			"homepage":    "https://example.com/remote-app",
+			"tools":       []any{},
+			"events":      []any{},
+			"scopes":      []string{"message:write"},
+		},
+	}
+	registryTS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version": 1,
+			"apps":    registryApps,
+		})
+	}))
+	t.Cleanup(registryTS.Close)
+
+	reg := registry.NewClient(time.Hour)
+	reg.AddSource("Test Registry", registryTS.URL)
+
+	srv := &Server{
+		Store:       s,
+		Registry:    reg,
+		Config:      &config.Config{RPOrigin: "http://localhost"},
+		OAuthStates: newOAuthStateStore(),
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	app, err := s.CreateApp(&store.App{
+		Name:        "Remote App",
+		Slug:        "remote-app",
+		Description: "Remote app from registry",
+		Registry:    registryTS.URL,
+		Version:     "1.0.0",
+		Listing:     "listed",
+		Scopes:      json.RawMessage(`["message:write"]`),
+	})
+	if err != nil {
+		t.Fatalf("CreateApp(remote): %v", err)
+	}
+
+	bot1 := createTestBot(t, s, user1.ID, "User1 Bot")
+	if _, err := s.InstallApp(app.ID, bot1.ID); err != nil {
+		t.Fatalf("InstallApp(user1): %v", err)
+	}
+
+	assertInstalled := func(t *testing.T, cookie *http.Cookie, wantInstalled bool) {
+		t.Helper()
+		resp := doJSON(t, ts, "GET", "/api/marketplace", nil, withCookie(cookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body := decodeJSON(t, resp)
+			t.Fatalf("expected 200, got %d: %v", resp.StatusCode, body)
+		}
+
+		var body []map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatalf("decode marketplace response: %v", err)
+		}
+		var remote map[string]any
+		for _, app := range body {
+			if slug, _ := app["slug"].(string); slug == "remote-app" {
+				remote = app
+				break
+			}
+		}
+		if remote == nil {
+			t.Fatalf("remote-app not found in marketplace response: %+v", body)
+		}
+
+		gotInstalled, _ := remote["installed"].(bool)
+		if gotInstalled != wantInstalled {
+			t.Fatalf("installed = %v, want %v; body = %+v", gotInstalled, wantInstalled, remote)
+		}
+	}
+
+	t.Run("owner of installation sees installed", func(t *testing.T) {
+		assertInstalled(t, cookie1, true)
+	})
+
+	t.Run("other user does not inherit installed status", func(t *testing.T) {
+		assertInstalled(t, cookie2, false)
+	})
+
+	admin, err := s.CreateUserFull("admin", "", "Admin", "hashed", store.RoleAdmin)
+	if err != nil {
+		t.Fatalf("CreateUserFull(admin): %v", err)
+	}
+	_ = s.UpdateUserStatus(admin.ID, store.StatusActive)
+	adminSession, err := auth.CreateSession(s, admin.ID)
+	if err != nil {
+		t.Fatalf("CreateSession(admin): %v", err)
+	}
+	adminCookie := &http.Cookie{Name: "session", Value: adminSession}
+
+	t.Run("unlisting clears installed status for owner", func(t *testing.T) {
+		resp := doJSON(t, ts, "PUT", "/api/admin/apps/"+app.ID+"/listing", map[string]any{
+			"listing": "unlisted",
+		}, withCookie(adminCookie))
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body := decodeJSON(t, resp)
+			t.Fatalf("expected 200, got %d: %v", resp.StatusCode, body)
+		}
+
+		assertInstalled(t, cookie1, false)
+	})
+}
+
+func TestUpdateListedAppWithEquivalentJSONDoesNotUnlist(t *testing.T) {
+	env := setupTestEnv(t)
+
+	app, err := env.store.CreateApp(&store.App{
+		OwnerID:      env.user.ID,
+		Name:         "Listed App",
+		Slug:         "listed-app",
+		Description:  "listed app",
+		Listing:      "listed",
+		Tools:        json.RawMessage(`[{"name":"tool","description":"Tool"}]`),
+		Events:       json.RawMessage(`["reaction.added","message"]`),
+		Scopes:       json.RawMessage(`["message:write","message:read"]`),
+		ConfigSchema: `{"properties":{"name":{"type":"string"}},"type":"object"}`,
+		Version:      "1.0.0",
+	})
+	if err != nil {
+		t.Fatalf("CreateApp: %v", err)
+	}
+	bot := createTestBot(t, env.store, env.user.ID, "Listed Bot")
+	inst, err := env.store.InstallApp(app.ID, bot.ID)
+	if err != nil {
+		t.Fatalf("InstallApp: %v", err)
+	}
+
+	resp := doJSON(t, env.ts, "PUT", "/api/apps/"+app.ID, map[string]any{
+		"tools":         []map[string]any{{"description": "Tool", "name": "tool"}},
+		"events":        []string{"message", "reaction.added", "message"},
+		"scopes":        []string{"message:read", "message:write", "message:read"},
+		"config_schema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"name\": {\n      \"type\": \"string\"\n    }\n  }\n}",
+		"version":       "1.0.0",
+	}, withCookie(env.cookie))
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body := decodeJSON(t, resp)
+		t.Fatalf("expected 200, got %d: %v", resp.StatusCode, body)
+	}
+
+	updated, err := env.store.GetApp(app.ID)
+	if err != nil {
+		t.Fatalf("GetApp: %v", err)
+	}
+	if updated.Listing != "listed" {
+		t.Fatalf("listing = %q, want listed", updated.Listing)
+	}
+	gotInst, err := env.store.GetInstallation(inst.ID)
+	if err != nil {
+		t.Fatalf("GetInstallation: %v", err)
+	}
+	if gotInst.ID != inst.ID {
+		t.Fatalf("installation id = %q, want %q", gotInst.ID, inst.ID)
 	}
 }
